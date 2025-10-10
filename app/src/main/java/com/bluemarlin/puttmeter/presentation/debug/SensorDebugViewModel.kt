@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.bluemarlin.puttmeter.data.sensor.SensorDataSource
 import com.bluemarlin.puttmeter.domain.model.SensorData
 import com.bluemarlin.puttmeter.domain.model.SensorStatus
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,6 +36,7 @@ class SensorDebugViewModel(
 
     private var lastUpdateTime = 0L
     private var updateCount = 0
+    private var collectionJob: Job? = null
 
     init {
         // 초기 센서 상태 체크
@@ -71,7 +73,7 @@ class SensorDebugViewModel(
         lastUpdateTime = System.currentTimeMillis()
         updateCount = 0
 
-        viewModelScope.launch {
+        collectionJob = viewModelScope.launch {
             sensorDataSource.getSensorDataStream()
                 .catch { e ->
                     _uiState.value = _uiState.value.copy(
@@ -80,25 +82,28 @@ class SensorDebugViewModel(
                     )
                 }
                 .collect { sensorData ->
-                    updateCount++
-                    val now = System.currentTimeMillis()
-                    val elapsedSeconds = (now - lastUpdateTime) / 1000f
+                    // 수집 중일 때만 UI 업데이트
+                    if (_uiState.value.isCollecting) {
+                        updateCount++
+                        val now = System.currentTimeMillis()
+                        val elapsedSeconds = (now - lastUpdateTime) / 1000f
 
-                    // 1초마다 평균 업데이트 속도 계산
-                    val avgRate = if (elapsedSeconds >= 1f) {
-                        val rate = updateCount / elapsedSeconds
-                        lastUpdateTime = now
-                        updateCount = 0
-                        rate
-                    } else {
-                        _uiState.value.averageUpdateRate
+                        // 1초마다 평균 업데이트 속도 계산
+                        val avgRate = if (elapsedSeconds >= 1f) {
+                            val rate = updateCount / elapsedSeconds
+                            lastUpdateTime = now
+                            updateCount = 0
+                            rate
+                        } else {
+                            _uiState.value.averageUpdateRate
+                        }
+
+                        _uiState.value = _uiState.value.copy(
+                            currentSensorData = sensorData,
+                            sampleCount = _uiState.value.sampleCount + 1,
+                            averageUpdateRate = avgRate
+                        )
                     }
-
-                    _uiState.value = _uiState.value.copy(
-                        currentSensorData = sensorData,
-                        sampleCount = _uiState.value.sampleCount + 1,
-                        averageUpdateRate = avgRate
-                    )
                 }
         }
     }
@@ -108,6 +113,8 @@ class SensorDebugViewModel(
      */
     fun stopCollecting() {
         _uiState.value = _uiState.value.copy(isCollecting = false)
+        collectionJob?.cancel()
+        collectionJob = null
     }
 
     /**
@@ -115,6 +122,11 @@ class SensorDebugViewModel(
      */
     fun clearError() {
         _uiState.value = _uiState.value.copy(error = null)
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        stopCollecting()
     }
 }
 

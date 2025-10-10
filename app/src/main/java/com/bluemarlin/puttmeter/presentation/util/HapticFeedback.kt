@@ -43,6 +43,20 @@ class HapticFeedback(private val context: Context) {
     }
     
     /**
+     * 어드레스 감지 진동 (부드러운 1회 - 준비 완료 알림)
+     */
+    fun addressDetected() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Android 10 이상: 부드러운 클릭 효과
+            val effect = VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK)
+            vibrator.vibrate(effect)
+        } else {
+            // 그 이전: 부드러운 진동
+            vibrate(80, 0.5f)
+        }
+    }
+    
+    /**
      * 측정 완료 진동 (부드러운 2회)
      */
     fun measurementComplete() {

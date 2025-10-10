@@ -1,5 +1,6 @@
 package com.bluemarlin.puttmeter.presentation.navigation
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
@@ -35,11 +36,17 @@ fun NavigationHost(
         }
         Screen.MEASUREMENT -> {
             val measurementViewModel = viewModel<com.bluemarlin.puttmeter.presentation.measurement.MeasurementViewModel>(factory = measurementViewModelFactory)
-            MeasurementScreen(viewModel = measurementViewModel)
+            MeasurementScreen(
+                viewModel = measurementViewModel,
+                onNavigateBack = { currentScreen = Screen.MENU }
+            )
         }
         Screen.DEBUG -> {
             val debugViewModel = viewModel<com.bluemarlin.puttmeter.presentation.debug.SensorDebugViewModel>(factory = debugViewModelFactory)
-            SensorDebugScreen(viewModel = debugViewModel)
+            SensorDebugScreen(
+                viewModel = debugViewModel,
+                onNavigateBack = { currentScreen = Screen.MENU }
+            )
         }
     }
 }
@@ -77,7 +84,7 @@ fun MenuScreen(
                 Chip(
                     onClick = onNavigateToMeasurement,
                     label = {
-                        Text("📏 퍼팅 측정")
+                        Text("퍼팅 측정")
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -87,7 +94,7 @@ fun MenuScreen(
                 Chip(
                     onClick = onNavigateToDebug,
                     label = {
-                        Text("🔧 센서 디버그")
+                        Text("센서 디버그")
                     },
                     modifier = Modifier.fillMaxWidth()
                 )

@@ -1,5 +1,6 @@
 package com.bluemarlin.puttmeter.presentation.measurement
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
@@ -18,20 +19,40 @@ import com.bluemarlin.puttmeter.presentation.util.HapticFeedback
 @Composable
 fun MeasurementScreen(
     viewModel: MeasurementViewModel,
+    onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val haptic = remember { HapticFeedback(context) }
     
-    // 임팩트 감지 시 진동
+    // Back navigation handler
+    BackHandler {
+        onNavigateBack()
+    }
+    
+    // 단계별 진동 피드백 (단계 전환 시에만)
+    var previousPhase by remember { mutableStateOf<StrokePhase?>(null) }
+    
     LaunchedEffect(uiState.currentPhase) {
-        when (uiState.currentPhase) {
-            is StrokePhase.Impact -> {
-                haptic.impactDetected()
+        val currentPhase = uiState.currentPhase
+        
+        // 이전 단계와 다를 때만 진동 발생
+        if (previousPhase?.javaClass != currentPhase.javaClass) {
+            when (currentPhase) {
+                is StrokePhase.Address -> {
+                    // Address 단계 진입 시 즉시 부드러운 진동으로 준비 완료 알림
+                    haptic.addressDetected()
+                }
+                is StrokePhase.Impact -> {
+                    // 임팩트 감지 시 강한 진동
+                    haptic.impactDetected()
+                }
+                else -> {}
             }
-            else -> {}
         }
+        
+        previousPhase = currentPhase
     }
     
     // 스트로크 완료 시 진동
@@ -151,12 +172,33 @@ fun ActiveMeasurementScreen(
             
             // 마지막 측정값 (있으면 표시)
             if (uiState.lastStroke != null) {
-                Text(
-                    text = "%.1f m".format(uiState.lastStroke.predictedDistance),
-                    fontSize = 32.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.Green
-                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "%.1f m".format(uiState.lastStroke.predictedDistance),
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Green
+                    )
+                    
+                    // 추가 메트릭 표시
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Text(
+                            text = "힘: ${uiState.lastStroke.metrics.impactForce.toInt()}N",
+                            style = MaterialTheme.typography.caption2,
+                            color = MaterialTheme.colors.onSurfaceVariant
+                        )
+                        Text(
+                            text = "속도: ${uiState.lastStroke.metrics.clubSpeed.toInt()}m/s",
+                            style = MaterialTheme.typography.caption2,
+                            color = MaterialTheme.colors.onSurfaceVariant
+                        )
+                    }
+                }
             }
             
             // 세션 카운터
@@ -184,12 +226,13 @@ fun ActiveMeasurementScreen(
 
 @Composable
 fun PhaseIndicator(phase: StrokePhase) {
-    val (text, color) = when (phase) {
-        is StrokePhase.Idle -> "대기 중" to Color.Gray
-        is StrokePhase.Backswing -> "백스윙" to Color.Yellow
-        is StrokePhase.Downswing -> "다운스윙" to Color.Yellow
-        is StrokePhase.Impact -> "임팩트!" to Color.Red
-        is StrokePhase.FollowThrough -> "완료" to Color.Green
+    val (text, color, subtitle) = when (phase) {
+        is StrokePhase.Idle -> Triple("대기 중", Color.Gray, "측정을 시작하세요")
+        is StrokePhase.Address -> Triple("어드레스", Color.Blue, "안정성: ${(phase.stabilityScore * 100).toInt()}%")
+        is StrokePhase.Backswing -> Triple("백스윙", Color.Yellow, "거리: ${phase.backswingDistance.toInt()}")
+        is StrokePhase.Downswing -> Triple("다운스윙", Color.LightGray, "속도: ${phase.clubSpeed.toInt()} m/s")
+        is StrokePhase.Impact -> Triple("임팩트!", Color.Red, "힘: ${phase.impactForce.toInt()} N")
+        is StrokePhase.FollowThrough -> Triple("팔로우스루", Color.Green, "완료")
     }
     
     Card(
@@ -208,14 +251,12 @@ fun PhaseIndicator(phase: StrokePhase) {
                 color = color
             )
             
-            // 애니메이션 표시
-            when (phase) {
-                is StrokePhase.Idle -> Text("퍼팅을 준비하세요", style = MaterialTheme.typography.caption2)
-                is StrokePhase.Backswing -> Text("감지 중...", style = MaterialTheme.typography.caption2)
-                is StrokePhase.Downswing -> Text("감지 중...", style = MaterialTheme.typography.caption2)
-                is StrokePhase.Impact -> Text("볼 임팩트 감지!", style = MaterialTheme.typography.caption2)
-                is StrokePhase.FollowThrough -> Text("측정 완료", style = MaterialTheme.typography.caption2)
-            }
+            // 상세 정보 표시
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.caption2,
+                color = MaterialTheme.colors.onSurfaceVariant
+            )
         }
     }
 }
@@ -246,16 +287,47 @@ fun LastStrokeCard(uiState: MeasurementUiState) {
                 color = Color.Green
             )
             
+            // 기본 메트릭
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = "힘: %.1f m/s²".format(stroke.metrics.peakAcceleration),
+                    text = "임팩트 힘: %.1f N".format(stroke.metrics.impactForce),
                     style = MaterialTheme.typography.caption2
                 )
                 Text(
-                    text = "%.0f ms".format(stroke.metrics.swingTime.toFloat()),
+                    text = "클럽 속도: %.1f m/s".format(stroke.metrics.clubSpeed),
+                    style = MaterialTheme.typography.caption2
+                )
+            }
+            
+            // 시간 메트릭
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "스윙 시간: %.0f ms".format(stroke.metrics.swingTime.toFloat()),
+                    style = MaterialTheme.typography.caption2
+                )
+                Text(
+                    text = "템포: %.1f".format(stroke.metrics.tempoRatio),
+                    style = MaterialTheme.typography.caption2
+                )
+            }
+            
+            // 품질 메트릭
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "부드러움: ${(stroke.metrics.smoothness * 100).toInt()}%",
+                    style = MaterialTheme.typography.caption2
+                )
+                Text(
+                    text = "안정성: ${(stroke.metrics.addressStability * 100).toInt()}%",
                     style = MaterialTheme.typography.caption2
                 )
             }

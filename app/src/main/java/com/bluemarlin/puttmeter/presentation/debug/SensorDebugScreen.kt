@@ -1,5 +1,6 @@
 package com.bluemarlin.puttmeter.presentation.debug
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.Composable
@@ -18,9 +19,15 @@ import kotlin.math.abs
 @Composable
 fun SensorDebugScreen(
     viewModel: SensorDebugViewModel,
+    onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
+
+    // Back navigation handler
+    BackHandler {
+        onNavigateBack()
+    }
 
     Scaffold(
         modifier = modifier,
