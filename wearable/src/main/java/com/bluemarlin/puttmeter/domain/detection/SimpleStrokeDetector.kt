@@ -7,11 +7,22 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
+ * 속도 측정 알고리즘
+ */
+enum class SpeedAlgorithm {
+    ACCELEROMETER_ONLY,      // 가속도계만 사용
+    GYROSCOPE_ONLY,          // 자이로스코프만 사용
+    SENSOR_FUSION,           // 가속도 + 자이로 융합
+    PEAK_ACCELERATION        // 피크 가속도 기반
+}
+
+/**
  * 단순화된 스트로크 감지기
  * 측정 시작 후 최대 속도를 감지하여 거리를 예측
  */
 class SimpleStrokeDetector(
-    private val calibrationFactor: Float = 1.0f  // 보정 계수 (속도 x 계수 = 거리)
+    private var calibrationFactor: Float = 1.0f,  // 보정 계수 (속도 x 계수 = 거리)
+    private val algorithm: SpeedAlgorithm = SpeedAlgorithm.SENSOR_FUSION  // 속도 측정 알고리즘
 ) {
     private val _detectedStroke = MutableStateFlow<SimplePuttStroke?>(null)
     val detectedStroke: StateFlow<SimplePuttStroke?> = _detectedStroke.asStateFlow()
@@ -98,8 +109,13 @@ class SimpleStrokeDetector(
         )
         previousSmoothedMagnitude = smoothedMagnitude
         
-        // 속도 추정 (가속도 적분 근사)
-        val speed = estimateSpeed(smoothedMagnitude)
+        // 선택된 알고리즘으로 속도 추정
+        val speed = when (algorithm) {
+            SpeedAlgorithm.ACCELEROMETER_ONLY -> estimateSpeedFromAccelerometer()
+            SpeedAlgorithm.GYROSCOPE_ONLY -> estimateSpeedFromGyroscope()
+            SpeedAlgorithm.SENSOR_FUSION -> estimateSpeedFusion()
+            SpeedAlgorithm.PEAK_ACCELERATION -> estimateSpeedFromPeak()
+        }
         
         // 최대 속도 업데이트
         if (speed > maxSpeed) {
@@ -115,10 +131,9 @@ class SimpleStrokeDetector(
     }
     
     /**
-     * 속도 추정 (간단한 적분 근사)
+     * 알고리즘 1: 가속도계만 사용 (기존 방식)
      */
-    private fun estimateSpeed(@Suppress("UNUSED_PARAMETER") acceleration: Float): Float {
-        // 최근 10개 샘플의 평균 가속도로 속도 추정
+    private fun estimateSpeedFromAccelerometer(): Float {
         if (sensorBuffer.size < 10) return 0f
         
         val recentSamples = sensorBuffer.takeLast(10)
@@ -126,11 +141,63 @@ class SimpleStrokeDetector(
             SignalFilter.removeGravity(it.acceleration).magnitude() 
         }
         
-        // 간단한 적분 (가속도 x 시간)
         val avgAcceleration = accelerations.average().toFloat()
-        val dt = 0.01f // 10ms = 0.01s
+        val dt = 0.01f
         
-        return avgAcceleration * dt * 10f // 10개 샘플
+        return avgAcceleration * dt * 10f
+    }
+    
+    /**
+     * 알고리즘 2: 자이로스코프만 사용
+     */
+    private fun estimateSpeedFromGyroscope(): Float {
+        if (sensorBuffer.size < 5) return 0f
+        
+        val recentSamples = sensorBuffer.takeLast(5)
+        val angularVelocities = recentSamples.map { 
+            it.gyroscope.magnitude()  // rad/s
+        }
+        
+        // 손목에서 퍼터 헤드까지 거리 (약 0.9m)
+        val armLength = 0.9f
+        
+        // 선속도 = 각속도 × 반지름
+        val maxAngularVel = angularVelocities.maxOrNull() ?: 0f
+        return maxAngularVel * armLength
+    }
+    
+    /**
+     * 알고리즘 3: 센서 융합 (가속도 + 자이로)
+     */
+    private fun estimateSpeedFusion(): Float {
+        if (sensorBuffer.size < 10) return 0f
+        
+        // 가속도 기반 속도
+        val accelSpeed = estimateSpeedFromAccelerometer()
+        
+        // 자이로 기반 속도
+        val gyroSpeed = estimateSpeedFromGyroscope()
+        
+        // 가중 평균 (자이로가 더 신뢰도 높음)
+        return gyroSpeed * 0.7f + accelSpeed * 0.3f
+    }
+    
+    /**
+     * 알고리즘 4: 피크 가속도 기반
+     */
+    private fun estimateSpeedFromPeak(): Float {
+        if (sensorBuffer.size < 20) return 0f
+        
+        val recentSamples = sensorBuffer.takeLast(20)
+        val accelerations = recentSamples.map { 
+            SignalFilter.removeGravity(it.acceleration).magnitude() 
+        }
+        
+        // 최대 가속도 찾기
+        val peakAccel = accelerations.maxOrNull() ?: 0f
+        
+        // 경험적 변환 계수 (캘리브레이션으로 조정)
+        return peakAccel * 0.15f
     }
     
     /**
@@ -162,6 +229,13 @@ class SimpleStrokeDetector(
      */
     fun clearDetectedStroke() {
         _detectedStroke.value = null
+    }
+    
+    /**
+     * 보정 계수 업데이트
+     */
+    fun updateCalibrationFactor(factor: Float) {
+        calibrationFactor = factor
     }
     
     /**

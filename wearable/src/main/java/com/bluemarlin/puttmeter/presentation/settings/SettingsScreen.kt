@@ -13,6 +13,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.material.*
+import com.bluemarlin.puttmeter.wearable.domain.detection.SpeedAlgorithm
 
 /**
  * 설정 메인 화면
@@ -60,6 +61,26 @@ fun SettingsScreen(
                     onBack = { selectedOption = null }
                 )
             }
+            SettingsOption.SPEED_ALGORITHM -> {
+                SpeedAlgorithmScreen(
+                    currentAlgorithm = uiState.speedAlgorithm,
+                    onAlgorithmSelected = { algorithm ->
+                        viewModel.setSpeedAlgorithm(algorithm)
+                        selectedOption = null
+                    },
+                    onBack = { selectedOption = null }
+                )
+            }
+            SettingsOption.COUNTDOWN_DURATION -> {
+                CountdownDurationScreen(
+                    currentDuration = uiState.countdownDuration,
+                    onDurationSelected = { duration ->
+                        viewModel.setCountdownDuration(duration)
+                        selectedOption = null
+                    },
+                    onBack = { selectedOption = null }
+                )
+            }
             SettingsOption.SENSOR_CHECK -> {
                 // 센서 체크는 별도 화면으로 이동
                 LaunchedEffect(Unit) {
@@ -85,6 +106,8 @@ fun SettingsScreen(
 enum class SettingsOption {
     CALIBRATION_COUNT,
     CALIBRATION_FACTOR,
+    SPEED_ALGORITHM,
+    COUNTDOWN_DURATION,
     SENSOR_CHECK
 }
 
@@ -128,8 +151,7 @@ fun SettingsMenuScreen(
                         Text("거리 보정 횟수")
                         Text(
                             text = "현재: ${uiState.calibrationCount}회",
-                            style = MaterialTheme.typography.caption2,
-                            color = MaterialTheme.colors.onSurfaceVariant
+                            style = MaterialTheme.typography.caption2
                         )
                     }
                 },
@@ -146,8 +168,46 @@ fun SettingsMenuScreen(
                         Text("보정 계수 변경")
                         Text(
                             text = "현재: %.2f".format(uiState.calibrationFactor),
-                            style = MaterialTheme.typography.caption2,
-                            color = MaterialTheme.colors.onSurfaceVariant
+                            style = MaterialTheme.typography.caption2
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        
+        // 속도 측정 알고리즘
+        item {
+            Chip(
+                onClick = { onOptionSelected(SettingsOption.SPEED_ALGORITHM) },
+                label = {
+                    Column {
+                        Text("속도 측정 방식")
+                        Text(
+                            text = when (uiState.speedAlgorithm) {
+                                SpeedAlgorithm.ACCELEROMETER_ONLY -> "가속도계만"
+                                SpeedAlgorithm.GYROSCOPE_ONLY -> "자이로스코프만"
+                                SpeedAlgorithm.SENSOR_FUSION -> "센서 융합"
+                                SpeedAlgorithm.PEAK_ACCELERATION -> "피크 가속도"
+                            },
+                            style = MaterialTheme.typography.caption2
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        
+        // 카운트다운 시간
+        item {
+            Chip(
+                onClick = { onOptionSelected(SettingsOption.COUNTDOWN_DURATION) },
+                label = {
+                    Column {
+                        Text("카운트다운 시간")
+                        Text(
+                            text = if (uiState.countdownDuration == 0) "즉시 시작" else "${uiState.countdownDuration}초",
+                            style = MaterialTheme.typography.caption2
                         )
                     }
                 },
@@ -250,6 +310,97 @@ fun CalibrationCountScreen(
                 },
                 modifier = Modifier.fillMaxWidth(0.9f),
                 colors = if (index == currentCount) {
+                    ChipDefaults.primaryChipColors()
+                } else {
+                    ChipDefaults.secondaryChipColors()
+                }
+            )
+        }
+        
+        // 뒤로 가기
+        item {
+            Button(
+                onClick = onBack,
+                modifier = Modifier.fillMaxWidth(0.9f),
+                colors = ButtonDefaults.secondaryButtonColors()
+            ) {
+                Text("뒤로")
+            }
+        }
+    }
+}
+
+/**
+ * 카운트다운 시간 선택 화면
+ */
+@Composable
+fun CountdownDurationScreen(
+    currentDuration: Int,
+    onDurationSelected: (Int) -> Unit,
+    onBack: () -> Unit
+) {
+    ScalingLazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colors.background),
+        contentPadding = PaddingValues(
+            top = 32.dp,
+            bottom = 32.dp,
+            start = 16.dp,
+            end = 16.dp
+        ),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // 타이틀
+        item {
+            Text(
+                text = "카운트다운 시간",
+                style = MaterialTheme.typography.title2,
+                color = MaterialTheme.colors.primary
+            )
+        }
+        
+        // 현재 설정
+        item {
+            Card(
+                onClick = {},
+                enabled = false,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "현재 설정",
+                        style = MaterialTheme.typography.caption1,
+                        color = MaterialTheme.colors.onSurfaceVariant
+                    )
+                    Text(
+                        text = if (currentDuration == 0) "즉시 시작" else "${currentDuration}초",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Green
+                    )
+                }
+            }
+        }
+        
+        // 시간 선택 옵션 (0~3초)
+        items(4) { index ->
+            Chip(
+                onClick = { onDurationSelected(index) },
+                label = {
+                    Text(
+                        text = if (index == 0) "즉시 시작" else "${index}초",
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Center,
+                        fontWeight = if (index == currentDuration) FontWeight.Bold else FontWeight.Normal
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(0.9f),
+                colors = if (index == currentDuration) {
                     ChipDefaults.primaryChipColors()
                 } else {
                     ChipDefaults.secondaryChipColors()
@@ -410,6 +561,170 @@ fun CalibrationFactorScreen(
                 colors = ButtonDefaults.secondaryButtonColors()
             ) {
                 Text("취소")
+            }
+        }
+    }
+}
+
+/**
+ * 속도 측정 알고리즘 선택 화면
+ */
+@Composable
+fun SpeedAlgorithmScreen(
+    currentAlgorithm: SpeedAlgorithm,
+    onAlgorithmSelected: (SpeedAlgorithm) -> Unit,
+    onBack: () -> Unit
+) {
+    ScalingLazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colors.background),
+        contentPadding = PaddingValues(
+            top = 32.dp,
+            bottom = 32.dp,
+            start = 16.dp,
+            end = 16.dp
+        ),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // 타이틀
+        item {
+            Text(
+                text = "속도 측정 방식",
+                style = MaterialTheme.typography.title2,
+                color = MaterialTheme.colors.primary
+            )
+        }
+        
+        // 현재 설정
+        item {
+            Card(
+                onClick = {},
+                enabled = false,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "현재 설정",
+                        style = MaterialTheme.typography.caption1,
+                        color = MaterialTheme.colors.onSurfaceVariant
+                    )
+                    Text(
+                        text = when (currentAlgorithm) {
+                            SpeedAlgorithm.ACCELEROMETER_ONLY -> "가속도계만"
+                            SpeedAlgorithm.GYROSCOPE_ONLY -> "자이로스코프만"
+                            SpeedAlgorithm.SENSOR_FUSION -> "센서 융합"
+                            SpeedAlgorithm.PEAK_ACCELERATION -> "피크 가속도"
+                        },
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Green
+                    )
+                }
+            }
+        }
+        
+        // 알고리즘 선택 옵션들
+        item {
+            Chip(
+                onClick = { onAlgorithmSelected(SpeedAlgorithm.SENSOR_FUSION) },
+                label = {
+                    Column {
+                        Text("센서 융합 (추천)")
+                        Text(
+                            text = "가속도 + 자이로",
+                            style = MaterialTheme.typography.caption2,
+                            color = MaterialTheme.colors.onSurfaceVariant
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(0.95f),
+                colors = if (currentAlgorithm == SpeedAlgorithm.SENSOR_FUSION) {
+                    ChipDefaults.primaryChipColors()
+                } else {
+                    ChipDefaults.secondaryChipColors()
+                }
+            )
+        }
+        
+        item {
+            Chip(
+                onClick = { onAlgorithmSelected(SpeedAlgorithm.GYROSCOPE_ONLY) },
+                label = {
+                    Column {
+                        Text("자이로스코프만")
+                        Text(
+                            text = "회전 속도 기반",
+                            style = MaterialTheme.typography.caption2,
+                            color = MaterialTheme.colors.onSurfaceVariant
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(0.95f),
+                colors = if (currentAlgorithm == SpeedAlgorithm.GYROSCOPE_ONLY) {
+                    ChipDefaults.primaryChipColors()
+                } else {
+                    ChipDefaults.secondaryChipColors()
+                }
+            )
+        }
+        
+        item {
+            Chip(
+                onClick = { onAlgorithmSelected(SpeedAlgorithm.ACCELEROMETER_ONLY) },
+                label = {
+                    Column {
+                        Text("가속도계만")
+                        Text(
+                            text = "가속도 적분",
+                            style = MaterialTheme.typography.caption2,
+                            color = MaterialTheme.colors.onSurfaceVariant
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(0.95f),
+                colors = if (currentAlgorithm == SpeedAlgorithm.ACCELEROMETER_ONLY) {
+                    ChipDefaults.primaryChipColors()
+                } else {
+                    ChipDefaults.secondaryChipColors()
+                }
+            )
+        }
+        
+        item {
+            Chip(
+                onClick = { onAlgorithmSelected(SpeedAlgorithm.PEAK_ACCELERATION) },
+                label = {
+                    Column {
+                        Text("피크 가속도")
+                        Text(
+                            text = "최대값 기반",
+                            style = MaterialTheme.typography.caption2,
+                            color = MaterialTheme.colors.onSurfaceVariant
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(0.95f),
+                colors = if (currentAlgorithm == SpeedAlgorithm.PEAK_ACCELERATION) {
+                    ChipDefaults.primaryChipColors()
+                } else {
+                    ChipDefaults.secondaryChipColors()
+                }
+            )
+        }
+        
+        // 뒤로 가기
+        item {
+            Button(
+                onClick = onBack,
+                modifier = Modifier.fillMaxWidth(0.9f),
+                colors = ButtonDefaults.secondaryButtonColors()
+            ) {
+                Text("뒤로")
             }
         }
     }

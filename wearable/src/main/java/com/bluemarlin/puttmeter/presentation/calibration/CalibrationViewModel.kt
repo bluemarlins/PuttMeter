@@ -8,6 +8,7 @@ import com.bluemarlin.puttmeter.wearable.data.sensor.SensorDataSource
 import com.bluemarlin.puttmeter.wearable.data.wearable.*
 import com.bluemarlin.puttmeter.wearable.domain.detection.CalibrationData
 import com.bluemarlin.puttmeter.wearable.domain.detection.SimpleStrokeDetector
+import com.bluemarlin.puttmeter.wearable.domain.detection.SpeedAlgorithm
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -48,9 +49,20 @@ class CalibrationViewModel(
         context.getSharedPreferences("putt_meter_prefs", Context.MODE_PRIVATE)
     
     private val wearableDataSender = WearableDataSender(context)
-    private val strokeDetector = SimpleStrokeDetector()
+    private lateinit var strokeDetector: SimpleStrokeDetector
     
     init {
+        // 저장된 속도 측정 알고리즘 로드
+        val algorithmName = sharedPreferences.getString("speed_algorithm", SpeedAlgorithm.SENSOR_FUSION.name)
+        val algorithm = try {
+            SpeedAlgorithm.valueOf(algorithmName ?: SpeedAlgorithm.SENSOR_FUSION.name)
+        } catch (e: Exception) {
+            SpeedAlgorithm.SENSOR_FUSION
+        }
+        
+        // 스트로크 감지기 생성
+        strokeDetector = SimpleStrokeDetector(algorithm = algorithm)
+        
         // 저장된 캘리브레이션 데이터 로드
         loadCalibrationData()
         
@@ -107,7 +119,7 @@ class CalibrationViewModel(
     }
     
     /**
-     * 측정 시작 (3초 카운트다운 후)
+     * 측정 시작 (설정된 시간만큼 카운트다운 후)
      */
     fun startMeasurement() {
         if (_uiState.value.isActive || _uiState.value.isCountingDown) return
@@ -122,13 +134,18 @@ class CalibrationViewModel(
             error = null
         )
         
-        // 3초 카운트다운 시작
+        // 설정된 카운트다운 시간 읽기
+        val countdownDuration = sharedPreferences.getInt("countdown_duration", 3)
+        
+        // 카운트다운 시작 (0이면 즉시 시작)
         viewModelScope.launch {
-            for (i in 3 downTo 1) {
-                _uiState.value = _uiState.value.copy(
-                    countdownSeconds = i
-                )
-                kotlinx.coroutines.delay(1000)
+            if (countdownDuration > 0) {
+                for (i in countdownDuration downTo 1) {
+                    _uiState.value = _uiState.value.copy(
+                        countdownSeconds = i
+                    )
+                    kotlinx.coroutines.delay(1000)
+                }
             }
             
             // 카운트다운 완료 후 측정 시작
@@ -233,11 +250,29 @@ class CalibrationViewModel(
     private fun observeSettingsChanges() {
         // SharedPreferences 변경 리스너
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key == "calibration_count" || key == "calibration_factor") {
+            if (key == "calibration_count" || key == "calibration_factor" || key == "speed_algorithm") {
+                // 알고리즘이 변경되면 감지기를 재생성해야 함
+                if (key == "speed_algorithm") {
+                    recreateDetector()
+                }
                 loadCalibrationData()
             }
         }
         sharedPreferences.registerOnSharedPreferenceChangeListener(listener)
+    }
+    
+    /**
+     * 감지기 재생성 (알고리즘 변경 시)
+     */
+    private fun recreateDetector() {
+        val algorithmName = sharedPreferences.getString("speed_algorithm", SpeedAlgorithm.SENSOR_FUSION.name)
+        val algorithm = try {
+            SpeedAlgorithm.valueOf(algorithmName ?: SpeedAlgorithm.SENSOR_FUSION.name)
+        } catch (e: Exception) {
+            SpeedAlgorithm.SENSOR_FUSION
+        }
+        
+        strokeDetector = SimpleStrokeDetector(algorithm = algorithm)
     }
     
     /**
