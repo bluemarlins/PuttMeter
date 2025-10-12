@@ -20,5 +20,6 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "PuttMeter"
-include(":app")
+include(":wearable")
+include(":mobile")
  
