@@ -18,6 +18,7 @@ import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material.*
 import com.bluemarlin.puttmeter.wearable.presentation.util.HapticFeedback
 import com.bluemarlin.puttmeter.wearable.presentation.util.KeepScreenOn
+import kotlin.math.abs
 
 @Composable
 fun MeasurementScreen(
@@ -28,9 +29,25 @@ fun MeasurementScreen(
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val haptic = remember { HapticFeedback(context) }
+
+    // viewModel 참조를 명시적으로 유지
+    val vm = viewModel
+    
+    // 화면 생명주기 관리
+    DisposableEffect(Unit) {
+        // 화면 진입 시
+        viewModel.onScreenEnter()
+        
+        onDispose {
+            // 화면 나갈 때 센서 수집 중지
+            viewModel.onScreenExit()
+        }
+    }
     
     // Back navigation handler
     BackHandler {
+        // 센서 수집 중지 후 화면 나가기
+        viewModel.onScreenExit()
         onNavigateBack()
     }
     
@@ -63,21 +80,80 @@ fun MeasurementScreen(
                 ActiveMeasurementScreen(
                     uiState = uiState,
                     onStop = { viewModel.stopMeasurement() },
-                    onRestart = { 
+                    onRestart = {
                         haptic.tapStart()
-                        viewModel.restartMeasurement() 
+                        viewModel.restartMeasurement()
                     }
                 )
             }
             else -> {
                 IdleMeasurementScreen(
                     uiState = uiState,
-                    onStart = { 
+                    onStart = {
                         haptic.tapStart()
-                        viewModel.startMeasurement() 
+                        viewModel.startMeasurement()
                     },
-                    onClearSession = { viewModel.clearSession() }
+                    onClearSession = { viewModel.clearSession() },
+                    onToggleDetailedStats = { viewModel.toggleDetailedStats() }
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun AutoStartCountdownScreen(
+    countdownSeconds: Int,
+    onCancel: () -> Unit
+) {
+    val context = LocalContext.current
+    val haptic = remember { HapticFeedback(context) }
+
+    // 카운트다운 숫자가 바뀔 때마다 진동
+    LaunchedEffect(countdownSeconds) {
+        haptic.tapStart()  // 가벼운 진동
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colors.background),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(24.dp),
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Text(
+                text = "자동 시작",
+                style = MaterialTheme.typography.title2,
+                color = MaterialTheme.colors.primary
+            )
+
+            // 카운트다운 숫자
+            Text(
+                text = countdownSeconds.toString(),
+                fontSize = 72.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colors.primary
+            )
+
+            Text(
+                text = "측정이 곧 시작됩니다",
+                style = MaterialTheme.typography.body1,
+                color = MaterialTheme.colors.onSurface
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 취소 버튼
+            Button(
+                onClick = onCancel,
+                modifier = Modifier.fillMaxWidth(0.8f),
+                colors = ButtonDefaults.secondaryButtonColors()
+            ) {
+                Text("취소")
             }
         }
     }
@@ -90,12 +166,12 @@ fun CountdownScreen(
 ) {
     val context = LocalContext.current
     val haptic = remember { HapticFeedback(context) }
-    
+
     // 카운트다운 숫자가 바뀔 때마다 진동
     LaunchedEffect(countdownSeconds) {
         haptic.tapStart()  // 가벼운 진동
     }
-    
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -112,7 +188,7 @@ fun CountdownScreen(
                 style = MaterialTheme.typography.title2,
                 color = MaterialTheme.colors.primary
             )
-            
+
             // 카운트다운 숫자
             Text(
                 text = countdownSeconds.toString(),
@@ -120,15 +196,15 @@ fun CountdownScreen(
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colors.primary
             )
-            
+
             Text(
                 text = "자세를 잡으세요",
                 style = MaterialTheme.typography.body1,
                 color = MaterialTheme.colors.onSurface
             )
-            
+
             Spacer(modifier = Modifier.height(16.dp))
-            
+
             // 취소 버튼
             Button(
                 onClick = onCancel,
@@ -145,10 +221,11 @@ fun CountdownScreen(
 fun IdleMeasurementScreen(
     uiState: MeasurementUiState,
     onStart: () -> Unit,
-    onClearSession: () -> Unit
+    onClearSession: () -> Unit,
+    onToggleDetailedStats: () -> Unit
 ) {
     val listState = rememberScalingLazyListState()
-    
+
     ScalingLazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -171,31 +248,100 @@ fun IdleMeasurementScreen(
                 color = MaterialTheme.colors.primary
             )
         }
-        
+
+        // 자동 시작 안내 메시지
+        item {
+            Card(
+                onClick = {},
+                enabled = false,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "자동 시작 대기 중",
+                        style = MaterialTheme.typography.caption1,
+                        color = MaterialTheme.colors.primary
+                    )
+                    Text(
+                        text = "퍼터를 2초간 정지시키면\n측정이 자동으로 시작됩니다",
+                        style = MaterialTheme.typography.caption2,
+                        color = MaterialTheme.colors.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+
+                    // 디버깅 정보 (개발용)
+                    if (uiState.isActive) {
+                        // 측정 중: 실시간 속도 표시
+                        Text(
+                            text = "속도: %.2f m/s".format(uiState.debugAccelMagnitude),
+                            style = MaterialTheme.typography.caption2,
+                            color = if (uiState.debugAccelMagnitude in 1.0f..2.0f) Color.Green else Color.Gray
+                        )
+                    } else {
+                        // 측정 대기 중 (첫 측정, 초기화 후, 측정 완료 후 모두):
+                        // wrist up 감지 상태 표시 (현재 센서 절대값)
+                        val accelColor = if (abs(uiState.debugAccelMagnitude) <= 5.0f) Color.Red else Color.Green
+                        val gyroColor = if (abs(uiState.debugGyroMagnitude) <= 0.5f) Color.Red else Color.Green
+
+                        Text(
+                            text = "Accel: %.2f m/s²".format(uiState.debugAccelMagnitude),
+                            style = MaterialTheme.typography.caption2,
+                            color = accelColor
+                        )
+                        Text(
+                            text = "Gyro: %.2f rad/s".format(uiState.debugGyroMagnitude),
+                            style = MaterialTheme.typography.caption2,
+                            color = gyroColor
+                        )
+                        
+                        // wrist up 상태 표시
+                        val isWristUp = (abs(uiState.debugAccelMagnitude) <= 5.0f) && 
+                                       (abs(uiState.debugGyroMagnitude) <= 0.5f)
+                        if (isWristUp) {
+                            Text(
+                                text = "⚠ WristUp 감지됨",
+                                style = MaterialTheme.typography.caption2,
+                                color = Color.Red,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // 마지막 측정 결과
         if (uiState.lastStroke != null) {
             item {
                 LastStrokeCard(uiState = uiState)
             }
         }
-        
+
         // 세션 통계
         if (uiState.strokeCount > 0) {
             item {
-                SessionStatsCard(uiState = uiState)
+                SessionStatsCard(
+                    uiState = uiState,
+                    onToggleDetailedStats = onToggleDetailedStats
+                )
             }
         }
-        
-        // 측정 시작 버튼
+
+        // 수동 측정 시작 버튼
         item {
             Button(
                 onClick = onStart,
-                modifier = Modifier.fillMaxWidth(0.9f)
+                modifier = Modifier.fillMaxWidth(0.9f),
+                colors = ButtonDefaults.secondaryButtonColors()
             ) {
-                Text("측정 시작")
+                Text("수동 시작")
             }
         }
-        
+
         // 세션 초기화 버튼
         if (uiState.strokeCount > 0) {
             item {
@@ -292,14 +438,44 @@ fun ActiveMeasurementScreen(
             }
         }
         
-        // 세션 카운터
-        if (uiState.strokeCount > 0) {
+        // 세션 카운터 및 스윙 진행 상태
+        if (uiState.strokeCount > 0 || uiState.currentSwingCount > 0) {
             item {
-                Text(
-                    text = "측정: ${uiState.strokeCount}회",
-                    style = MaterialTheme.typography.caption2,
-                    color = MaterialTheme.colors.onSurfaceVariant
-                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    if (uiState.isAutoStarted) {
+                        // 자동 시작 모드: 스윙 진행 상태 표시
+                        Text(
+                            text = "스윙: ${uiState.currentSwingCount}/${uiState.targetSwingCount}회",
+                            style = MaterialTheme.typography.caption2,
+                            color = if (uiState.isSwingCompleted) Color.Green else MaterialTheme.colors.primary
+                        )
+                        if (uiState.isSwingCompleted) {
+                            Text(
+                                text = "측정 완료!",
+                                style = MaterialTheme.typography.caption1,
+                                color = Color.Green,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    } else {
+                        // 수동 시작 모드: 기존 방식
+                        Text(
+                            text = "측정: ${uiState.strokeCount}회",
+                            style = MaterialTheme.typography.caption2,
+                            color = MaterialTheme.colors.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        // 스윙 히스토리 표시 (측정 중일 때)
+        if (uiState.sessionStrokes.isNotEmpty()) {
+            item {
+                SwingHistoryCard(uiState = uiState)
             }
         }
         
@@ -374,7 +550,7 @@ fun LastStrokeCard(uiState: MeasurementUiState) {
 }
 
 @Composable
-fun SessionStatsCard(uiState: MeasurementUiState) {
+fun SwingHistoryCard(uiState: MeasurementUiState) {
     Card(
         onClick = {},
         enabled = false,
@@ -382,14 +558,86 @@ fun SessionStatsCard(uiState: MeasurementUiState) {
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
-                text = "세션 통계",
+                text = "스윙 기록",
                 style = MaterialTheme.typography.caption1,
                 color = MaterialTheme.colors.primary
             )
-            
+
+            // 각 스윙 기록 표시
+            uiState.sessionStrokes.forEachIndexed { index, stroke ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 스윙 번호
+                    Text(
+                        text = "${index + 1}회",
+                        style = MaterialTheme.typography.caption2,
+                        color = MaterialTheme.colors.primary,
+                        modifier = Modifier.width(32.dp)
+                    )
+
+                    // 속도와 거리
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "%.2f m/s".format(stroke.maxSpeed),
+                            style = MaterialTheme.typography.caption2,
+                            color = MaterialTheme.colors.onSurface
+                        )
+                        Text(
+                            text = "%.1f m".format(stroke.predictedDistance),
+                            style = MaterialTheme.typography.caption2,
+                            color = Color.Green,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
+                // 마지막 스윙이 아니면 구분선
+                if (index < uiState.sessionStrokes.size - 1) {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SessionStatsCard(
+    uiState: MeasurementUiState,
+    onToggleDetailedStats: () -> Unit
+) {
+    Card(
+        onClick = onToggleDetailedStats,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // 헤더
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "세션 통계",
+                    style = MaterialTheme.typography.caption1,
+                    color = MaterialTheme.colors.primary
+                )
+                Text(
+                    text = if (uiState.showDetailedStats) "▼" else "▶",
+                    style = MaterialTheme.typography.caption2,
+                    color = MaterialTheme.colors.onSurfaceVariant
+                )
+            }
+
+            // 기본 통계
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -405,7 +653,7 @@ fun SessionStatsCard(uiState: MeasurementUiState) {
                         fontWeight = FontWeight.Bold
                     )
                 }
-                
+
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
                         text = "퍼팅 횟수",
@@ -416,6 +664,71 @@ fun SessionStatsCard(uiState: MeasurementUiState) {
                         text = "${uiState.strokeCount}회",
                         fontWeight = FontWeight.Bold
                     )
+                }
+            }
+
+            // 평균 스윙 시간 표시 (측정 완료 시)
+            if (uiState.strokeCount > 1 && uiState.averageSwingTime > 0) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "평균 스윙 시간: ${uiState.averageSwingTime}ms",
+                        style = MaterialTheme.typography.caption2,
+                        color = MaterialTheme.colors.primary,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+
+            // 상세 통계 표시
+            if (uiState.showDetailedStats && uiState.sessionStrokes.isNotEmpty()) {
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                Text(
+                    text = "상세 기록",
+                    style = MaterialTheme.typography.caption2,
+                    color = MaterialTheme.colors.primary,
+                    fontWeight = FontWeight.Medium
+                )
+
+                // 각 스윙의 상세 기록
+                uiState.sessionStrokes.forEachIndexed { index, stroke ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // 스윙 번호와 속도
+                        Column {
+                            Text(
+                                text = "${index + 1}회",
+                                style = MaterialTheme.typography.caption2,
+                                color = MaterialTheme.colors.primary
+                            )
+                            Text(
+                                text = "%.2f m/s".format(stroke.maxSpeed),
+                                style = MaterialTheme.typography.caption3,
+                                color = MaterialTheme.colors.onSurfaceVariant
+                            )
+                        }
+
+                        // 예측 거리
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "%.1f m".format(stroke.predictedDistance),
+                                style = MaterialTheme.typography.caption2,
+                                color = Color.Green,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+
+                    // 마지막 항목이 아니면 구분선
+                    if (index < uiState.sessionStrokes.size - 1) {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+                    }
                 }
             }
         }

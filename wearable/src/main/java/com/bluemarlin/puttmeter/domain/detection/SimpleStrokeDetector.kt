@@ -48,9 +48,14 @@ class SimpleStrokeDetector(
     
     // 초기 안정화 시간
     private val stabilizationTime = 500L // 측정 시작 후 0.5초는 무시
-    
+
     // 이전 평활화된 값
     private var previousSmoothedMagnitude = 0f
+
+    // 스윙 감지용 변수들
+    private var previousMaxSpeed = 0f
+    private var lastSwingTime = 0L
+    private val minSwingInterval = 500L // 최소 스윙 간격 (500ms)
     
     /**
      * 측정 시작
@@ -62,6 +67,9 @@ class SimpleStrokeDetector(
         maxSpeedTimestamp = 0L
         lastSignificantMotionTime = measurementStartTime
         previousSmoothedMagnitude = 0f
+        // 스윙 감지 변수 초기화
+        previousMaxSpeed = 0f
+        lastSwingTime = measurementStartTime
         sensorBuffer.clear()
         _currentMaxSpeed.value = 0f
     }
@@ -70,7 +78,7 @@ class SimpleStrokeDetector(
      * 측정 중지
      */
     fun stopMeasurement() {
-        if (_isActive.value && maxSpeed > 0.5f) { // 최소 속도 임계값
+        if (_isActive.value && maxSpeed > 0.1f) { // 최소 속도 임계값 (완화)
             completeStroke()
         }
         _isActive.value = false
@@ -123,9 +131,32 @@ class SimpleStrokeDetector(
             maxSpeedTimestamp = sensorData.timestamp
             _currentMaxSpeed.value = speed
         }
+
+        // 실시간 스윙 감지: 속도가 1.0~2.0 m/s 범위에 도달하고 최소 간격이 지났으면 스윙으로 간주
+        val isValidPuttingSpeed = speed in 1.0f..2.0f
+        val timeSinceLastSwing = sensorData.timestamp - lastSwingTime
+
+        if (isValidPuttingSpeed && timeSinceLastSwing > minSwingInterval) {
+            // 새로운 스윙 감지
+            val strokeSpeed = speed  // 현재 속도를 사용
+            val predictedDistance = predictDistanceFromSpeed(strokeSpeed)
+
+            val stroke = SimplePuttStroke(
+                timestamp = sensorData.timestamp,
+                maxSpeed = strokeSpeed,
+                predictedDistance = predictedDistance.coerceIn(0.1f, 15.0f),
+                swingTime = 300L // 기본 스윙 시간
+            )
+
+            _detectedStroke.value = stroke
+
+            // 다음 스윙을 위해 변수들 리셋
+            maxSpeed = 0f
+            lastSwingTime = sensorData.timestamp
+        }
         
         // 움직임 감지 (타임아웃 없이 계속 측정)
-        if (smoothedMagnitude > 1.0f) { // 움직임 임계값
+        if (smoothedMagnitude > 0.3f) { // 움직임 임계값 (완화)
             lastSignificantMotionTime = sensorData.timestamp
         }
     }
@@ -134,17 +165,18 @@ class SimpleStrokeDetector(
      * 알고리즘 1: 가속도계만 사용 (기존 방식)
      */
     private fun estimateSpeedFromAccelerometer(): Float {
-        if (sensorBuffer.size < 10) return 0f
-        
-        val recentSamples = sensorBuffer.takeLast(10)
-        val accelerations = recentSamples.map { 
-            SignalFilter.removeGravity(it.acceleration).magnitude() 
+        if (sensorBuffer.size < 5) return 0f  // 최소 샘플 수 감소
+
+        val recentSamples = sensorBuffer.takeLast(5)  // 샘플 수 감소
+        val accelerations = recentSamples.map {
+            SignalFilter.removeGravity(it.acceleration).magnitude()
         }
-        
-        val avgAcceleration = accelerations.average().toFloat()
+
+        val maxAcceleration = accelerations.maxOrNull() ?: 0f  // 최대값 사용
         val dt = 0.01f
-        
-        return avgAcceleration * dt * 10f
+
+        // 더 간단한 속도 계산
+        return maxAcceleration * dt * 5f  // 계수 조정
     }
     
     /**
@@ -207,12 +239,12 @@ class SimpleStrokeDetector(
         val elapsedTime = maxSpeedTimestamp - measurementStartTime
         
         // 최소 스윙 시간 체크
-        if (elapsedTime < 200L) { // 200ms 미만은 무효
+        if (elapsedTime < 100L) { // 100ms 미만은 무효 (완화)
             return
         }
         
-        // 거리 예측: 속도 x 보정 계수
-        val predictedDistance = maxSpeed * calibrationFactor
+        // 거리 예측: 새로운 속도-거리 관계 기반
+        val predictedDistance = predictDistanceFromSpeed(maxSpeed)
         
         val stroke = SimplePuttStroke(
             timestamp = maxSpeedTimestamp,
@@ -239,6 +271,18 @@ class SimpleStrokeDetector(
     }
     
     /**
+     * 속도를 이용한 거리 예측 함수
+     * 1 m/s = 2 m, 2 m/s = 20 m 기반 선형 관계
+     */
+    private fun predictDistanceFromSpeed(speed: Float): Float {
+        // 선형 관계: 거리 = 18 * 속도 - 16
+        // 검증: 1m/s -> 18*1 - 16 = 2m ✓
+        //       2m/s -> 18*2 - 16 = 20m ✓
+        val distance = 18f * speed - 16f
+        return distance.coerceAtLeast(0f) // 음수 방지
+    }
+
+    /**
      * 리셋
      */
     fun reset() {
@@ -251,6 +295,9 @@ class SimpleStrokeDetector(
         measurementStartTime = 0L
         lastSignificantMotionTime = 0L
         previousSmoothedMagnitude = 0f
+        // 스윙 감지 변수 초기화
+        previousMaxSpeed = 0f
+        lastSwingTime = 0L
     }
 }
 
