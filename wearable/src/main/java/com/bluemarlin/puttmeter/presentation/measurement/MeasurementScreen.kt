@@ -284,7 +284,7 @@ fun IdleMeasurementScreen(
                     } else {
                         // 측정 대기 중 (첫 측정, 초기화 후, 측정 완료 후 모두):
                         // wrist up 감지 상태 표시 (현재 센서 절대값)
-                        val accelColor = if (abs(uiState.debugAccelMagnitude) <= 5.0f) Color.Red else Color.Green
+                        val accelColor = if (abs(uiState.debugAccelMagnitude) <= 10.0f) Color.Red else Color.Green
                         val gyroColor = if (abs(uiState.debugGyroMagnitude) <= 0.5f) Color.Red else Color.Green
 
                         Text(
@@ -299,7 +299,7 @@ fun IdleMeasurementScreen(
                         )
                         
                         // wrist up 상태 표시
-                        val isWristUp = (abs(uiState.debugAccelMagnitude) <= 5.0f) && 
+                        val isWristUp = (abs(uiState.debugAccelMagnitude) <= 10.0f) && 
                                        (abs(uiState.debugGyroMagnitude) <= 0.5f)
                         if (isWristUp) {
                             Text(
@@ -541,6 +541,16 @@ fun LastStrokeCard(uiState: MeasurementUiState) {
                     style = MaterialTheme.typography.caption2
                 )
                 Text(
+                    text = "스윙 각도: %.1f°".format(stroke.swingAngle),
+                    style = MaterialTheme.typography.caption2
+                )
+            }
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Text(
                     text = "스윙 시간: %.0f ms".format(stroke.swingTime.toFloat()),
                     style = MaterialTheme.typography.caption2
                 )
@@ -581,7 +591,7 @@ fun SwingHistoryCard(uiState: MeasurementUiState) {
                         modifier = Modifier.width(32.dp)
                     )
 
-                    // 속도와 거리
+                    // 속도, 거리, 각도
                     Column(horizontalAlignment = Alignment.End) {
                         Text(
                             text = "%.2f m/s".format(stroke.maxSpeed),
@@ -593,6 +603,11 @@ fun SwingHistoryCard(uiState: MeasurementUiState) {
                             style = MaterialTheme.typography.caption2,
                             color = Color.Green,
                             fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = "%.1f°".format(stroke.swingAngle),
+                            style = MaterialTheme.typography.caption3,
+                            color = MaterialTheme.colors.onSurfaceVariant
                         )
                     }
                 }
@@ -700,7 +715,7 @@ fun SessionStatsCard(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // 스윙 번호와 속도
+                        // 스윙 번호, 속도, 각도
                         Column {
                             Text(
                                 text = "${index + 1}회",
@@ -712,15 +727,25 @@ fun SessionStatsCard(
                                 style = MaterialTheme.typography.caption3,
                                 color = MaterialTheme.colors.onSurfaceVariant
                             )
+                            Text(
+                                text = "%.1f°".format(stroke.swingAngle),
+                                style = MaterialTheme.typography.caption3,
+                                color = MaterialTheme.colors.onSurfaceVariant
+                            )
                         }
 
-                        // 예측 거리
+                        // 예측 거리와 스윙 시간
                         Column(horizontalAlignment = Alignment.End) {
                             Text(
                                 text = "%.1f m".format(stroke.predictedDistance),
                                 style = MaterialTheme.typography.caption2,
                                 color = Color.Green,
                                 fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "%.0f ms".format(stroke.swingTime.toFloat()),
+                                style = MaterialTheme.typography.caption3,
+                                color = MaterialTheme.colors.onSurfaceVariant
                             )
                         }
                     }

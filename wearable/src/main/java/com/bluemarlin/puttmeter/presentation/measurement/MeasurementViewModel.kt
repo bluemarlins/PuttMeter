@@ -85,7 +85,7 @@ class MeasurementViewModel(
     // wrist up 감지 관련
     private var wristUpStartTime = 0L
     private val wristUpThreshold = 2000L  // wrist up 상태 2초 지속 시 새로운 측정 시작 방지
-    private val wristUpAccelThreshold = 8.0f  // wrist up으로 간주하는 가속도 범위 (더 예민)
+    private val wristUpAccelThreshold = 10.0f  // wrist up으로 간주하는 가속도 범위 (더 예민)
     private val wristUpGyroThreshold = 0.5f   // wrist up으로 간주하는 자이로 범위
 
     // 이전 센서 값 저장용

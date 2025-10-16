@@ -57,6 +57,11 @@ class SimpleStrokeDetector(
     private var lastSwingTime = 0L
     private val minSwingInterval = 500L // 최소 스윙 간격 (500ms)
     
+    // 스윙 각도 계산용 변수들
+    private var swingStartTime = 0L
+    private var totalSwingAngle = 0f // 누적 스윙 각도 (라디안)
+    private var maxSwingAngle = 0f   // 최대 스윙 각도 (라디안)
+    
     /**
      * 측정 시작
      */
@@ -70,6 +75,10 @@ class SimpleStrokeDetector(
         // 스윙 감지 변수 초기화
         previousMaxSpeed = 0f
         lastSwingTime = measurementStartTime
+        // 스윙 각도 변수 초기화
+        swingStartTime = measurementStartTime
+        totalSwingAngle = 0f
+        maxSwingAngle = 0f
         sensorBuffer.clear()
         _currentMaxSpeed.value = 0f
     }
@@ -117,6 +126,21 @@ class SimpleStrokeDetector(
         )
         previousSmoothedMagnitude = smoothedMagnitude
         
+        // 스윙 각도 계산 (자이로스코프 각속도 적분)
+        val gyroMagnitude = sensorData.gyroscope.magnitude() // rad/s
+        val dt = if (sensorBuffer.size > 1) {
+            (sensorData.timestamp - sensorBuffer[sensorBuffer.size - 2].timestamp).toFloat() / 1000f // 초 단위
+        } else {
+            0.01f // 기본값 100Hz
+        }
+        val deltaAngle = gyroMagnitude * dt // 라디안
+        totalSwingAngle += deltaAngle
+        
+        // 최대 스윙 각도 추적
+        if (totalSwingAngle > maxSwingAngle) {
+            maxSwingAngle = totalSwingAngle
+        }
+        
         // 선택된 알고리즘으로 속도 추정
         val speed = when (algorithm) {
             SpeedAlgorithm.ACCELEROMETER_ONLY -> estimateSpeedFromAccelerometer()
@@ -140,12 +164,17 @@ class SimpleStrokeDetector(
             // 새로운 스윙 감지
             val strokeSpeed = speed  // 현재 속도를 사용
             val predictedDistance = predictDistanceFromSpeed(strokeSpeed)
+            val swingTimeDuration = sensorData.timestamp - swingStartTime
+            
+            // 스윙 각도를 도(degree)로 변환
+            val swingAngleDegrees = Math.toDegrees(maxSwingAngle.toDouble()).toFloat()
 
             val stroke = SimplePuttStroke(
                 timestamp = sensorData.timestamp,
                 maxSpeed = strokeSpeed,
                 predictedDistance = predictedDistance.coerceIn(0.1f, 15.0f),
-                swingTime = 300L // 기본 스윙 시간
+                swingTime = swingTimeDuration,
+                swingAngle = swingAngleDegrees
             )
 
             _detectedStroke.value = stroke
@@ -153,6 +182,9 @@ class SimpleStrokeDetector(
             // 다음 스윙을 위해 변수들 리셋
             maxSpeed = 0f
             lastSwingTime = sensorData.timestamp
+            swingStartTime = sensorData.timestamp
+            totalSwingAngle = 0f
+            maxSwingAngle = 0f
         }
         
         // 움직임 감지 (타임아웃 없이 계속 측정)
@@ -246,11 +278,15 @@ class SimpleStrokeDetector(
         // 거리 예측: 새로운 속도-거리 관계 기반
         val predictedDistance = predictDistanceFromSpeed(maxSpeed)
         
+        // 스윙 각도를 도(degree)로 변환
+        val swingAngleDegrees = Math.toDegrees(maxSwingAngle.toDouble()).toFloat()
+        
         val stroke = SimplePuttStroke(
             timestamp = maxSpeedTimestamp,
             maxSpeed = maxSpeed,
             predictedDistance = predictedDistance.coerceIn(0.1f, 15.0f), // 0.1m ~ 15m
-            swingTime = elapsedTime
+            swingTime = elapsedTime,
+            swingAngle = swingAngleDegrees
         )
         
         _detectedStroke.value = stroke
@@ -298,6 +334,10 @@ class SimpleStrokeDetector(
         // 스윙 감지 변수 초기화
         previousMaxSpeed = 0f
         lastSwingTime = 0L
+        // 스윙 각도 변수 초기화
+        swingStartTime = 0L
+        totalSwingAngle = 0f
+        maxSwingAngle = 0f
     }
 }
 
@@ -309,7 +349,8 @@ data class SimplePuttStroke(
     val maxSpeed: Float,           // 최대 속도 (m/s)
     val predictedDistance: Float,  // 예측 거리 (m)
     val actualDistance: Float? = null, // 실제 거리 (캘리브레이션용)
-    val swingTime: Long = 0L       // 스윙 시간 (ms)
+    val swingTime: Long = 0L,      // 스윙 시간 (ms)
+    val swingAngle: Float = 0f     // 스윙 각도 (도)
 )
 
 /**
