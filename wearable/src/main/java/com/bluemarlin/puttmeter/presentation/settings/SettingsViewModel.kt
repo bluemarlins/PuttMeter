@@ -16,6 +16,7 @@ data class SettingsUiState(
     val calibrationFactor: Float = 1.0f,   // 보정 계수
     val speedAlgorithm: SpeedAlgorithm = SpeedAlgorithm.SENSOR_FUSION,  // 속도 측정 알고리즘
     val idleSensitivity: Int = 3,          // 정지 감도 (1~5, 기본값 3)
+    val puttingSensitivity: Int = 3,       // 퍼팅 감도 (1~5, 기본값 3)
     val lastUpdated: Long = 0L
 )
 
@@ -37,12 +38,14 @@ class SettingsViewModel(
         const val PREF_CALIBRATION_FACTOR = "calibration_factor"
         const val PREF_SPEED_ALGORITHM = "speed_algorithm"
         const val PREF_IDLE_SENSITIVITY = "idle_sensitivity"
+        const val PREF_PUTTING_SENSITIVITY = "putting_sensitivity"
         const val PREF_LAST_UPDATED = "last_updated"
         
         const val DEFAULT_CALIBRATION_COUNT = 5
         const val DEFAULT_CALIBRATION_FACTOR = 1.0f
         val DEFAULT_SPEED_ALGORITHM = SpeedAlgorithm.SENSOR_FUSION
         const val DEFAULT_IDLE_SENSITIVITY = 3
+        const val DEFAULT_PUTTING_SENSITIVITY = 3
     }
     
     init {
@@ -62,6 +65,7 @@ class SettingsViewModel(
             DEFAULT_SPEED_ALGORITHM
         }
         val idleSensitivity = sharedPreferences.getInt(PREF_IDLE_SENSITIVITY, DEFAULT_IDLE_SENSITIVITY)
+        val puttingSensitivity = sharedPreferences.getInt(PREF_PUTTING_SENSITIVITY, DEFAULT_PUTTING_SENSITIVITY)
         val lastUpdated = sharedPreferences.getLong(PREF_LAST_UPDATED, 0L)
         
         _uiState.value = SettingsUiState(
@@ -69,6 +73,7 @@ class SettingsViewModel(
             calibrationFactor = factor,
             speedAlgorithm = algorithm,
             idleSensitivity = idleSensitivity,
+            puttingSensitivity = puttingSensitivity,
             lastUpdated = lastUpdated
         )
     }
@@ -121,6 +126,18 @@ class SettingsViewModel(
     }
     
     /**
+     * 퍼팅 감도 변경
+     */
+    fun setPuttingSensitivity(sensitivity: Int) {
+        val validSensitivity = sensitivity.coerceIn(1, 5)
+        _uiState.value = _uiState.value.copy(
+            puttingSensitivity = validSensitivity,
+            lastUpdated = System.currentTimeMillis()
+        )
+        saveSettings()
+    }
+    
+    /**
      * 설정 저장
      */
     private fun saveSettings() {
@@ -129,6 +146,7 @@ class SettingsViewModel(
             putFloat(PREF_CALIBRATION_FACTOR, _uiState.value.calibrationFactor)
             putString(PREF_SPEED_ALGORITHM, _uiState.value.speedAlgorithm.name)
             putInt(PREF_IDLE_SENSITIVITY, _uiState.value.idleSensitivity)
+            putInt(PREF_PUTTING_SENSITIVITY, _uiState.value.puttingSensitivity)
             putLong(PREF_LAST_UPDATED, _uiState.value.lastUpdated)
             apply()
         }
@@ -143,6 +161,7 @@ class SettingsViewModel(
             calibrationFactor = DEFAULT_CALIBRATION_FACTOR,
             speedAlgorithm = DEFAULT_SPEED_ALGORITHM,
             idleSensitivity = DEFAULT_IDLE_SENSITIVITY,
+            puttingSensitivity = DEFAULT_PUTTING_SENSITIVITY,
             lastUpdated = System.currentTimeMillis()
         )
         saveSettings()

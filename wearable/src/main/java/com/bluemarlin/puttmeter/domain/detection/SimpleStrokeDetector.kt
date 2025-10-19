@@ -22,7 +22,8 @@ enum class SpeedAlgorithm {
  */
 class SimpleStrokeDetector(
     private var calibrationFactor: Float = 1.0f,  // 보정 계수 (속도 x 계수 = 거리)
-    private val algorithm: SpeedAlgorithm = SpeedAlgorithm.SENSOR_FUSION  // 속도 측정 알고리즘
+    private val algorithm: SpeedAlgorithm = SpeedAlgorithm.SENSOR_FUSION,  // 속도 측정 알고리즘
+    swingStartThreshold: Float = 0.3f  // 스윙 시작 임계값 (외부 설정 가능)
 ) {
     private val _detectedStroke = MutableStateFlow<SimplePuttStroke?>(null)
     val detectedStroke: StateFlow<SimplePuttStroke?> = _detectedStroke.asStateFlow()
@@ -57,7 +58,7 @@ class SimpleStrokeDetector(
     private var isPeakReached = false  // 최대 속도에 도달했는지
     
     // 스윙 감지 임계값
-    private val swingStartThreshold = 0.3f  // 스윙 시작 속도 (m/s)
+    private var swingStartThreshold = swingStartThreshold  // 스윙 시작 속도 (m/s, 외부 설정)
     private val swingEndIdleTime = 500L  // 스윙 종료 판단 시간 (500ms 정지)
     private val minSwingDuration = 150L  // 최소 스윙 시간 (150ms)
     private val motionThreshold = 1.0f  // 움직임 감지 임계값 (1.0 m/s²)
@@ -372,6 +373,13 @@ class SimpleStrokeDetector(
      */
     fun updateCalibrationFactor(factor: Float) {
         calibrationFactor = factor
+    }
+    
+    /**
+     * 스윙 시작 임계값 업데이트
+     */
+    fun updateSwingStartThreshold(threshold: Float) {
+        swingStartThreshold = threshold
     }
     
     /**

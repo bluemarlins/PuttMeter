@@ -100,11 +100,16 @@ class MeasurementViewModel(
         // 저장된 정지 감도 로드 및 임계값 설정
         val idleSensitivity = sharedPreferences.getInt("idle_sensitivity", 3)
         updateIdleSensitivity(idleSensitivity)
+        
+        // 저장된 퍼팅 감도 로드
+        val puttingSensitivity = sharedPreferences.getInt("putting_sensitivity", 3)
+        val swingStartThreshold = getPuttingThreshold(puttingSensitivity)
 
         // 스트로크 감지기 생성
         strokeDetector = SimpleStrokeDetector(
             calibrationFactor = calibrationFactor,
-            algorithm = algorithm
+            algorithm = algorithm,
+            swingStartThreshold = swingStartThreshold
         )
 
         // 설정 변경 감지
@@ -175,6 +180,24 @@ class MeasurementViewModel(
     }
     
     /**
+     * 퍼팅 감도를 임계값으로 변환
+     * @param sensitivity 1~5 (1=매우 민감, 3=보통, 5=매우 둔감)
+     */
+    private fun getPuttingThreshold(sensitivity: Int): Float {
+        // 감도에 따라 스윙 시작 임계값 조정
+        // 감도가 낮을수록 (1) 임계값이 낮아짐 (작은 움직임도 퍼팅으로 감지)
+        // 감도가 높을수록 (5) 임계값이 높아짐 (큰 움직임만 퍼팅으로 감지)
+        return when (sensitivity) {
+            1 -> 0.1f   // 매우 민감 (작은 움직임도 퍼팅)
+            2 -> 0.2f   // 민감
+            3 -> 0.3f   // 보통 (기본값)
+            4 -> 0.5f   // 둔감
+            5 -> 0.7f   // 매우 둔감 (큰 움직임만 퍼팅)
+            else -> 0.3f
+        }
+    }
+    
+    /**
      * 설정 변경 감지
      */
     private fun observeSettingsChanges() {
@@ -197,6 +220,11 @@ class MeasurementViewModel(
                 "idle_sensitivity" -> {
                     val sensitivity = sharedPreferences.getInt("idle_sensitivity", 3)
                     updateIdleSensitivity(sensitivity)
+                }
+                "putting_sensitivity" -> {
+                    val sensitivity = sharedPreferences.getInt("putting_sensitivity", 3)
+                    val threshold = getPuttingThreshold(sensitivity)
+                    strokeDetector.updateSwingStartThreshold(threshold)
                 }
             }
         }
