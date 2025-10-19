@@ -17,7 +17,6 @@ import kotlinx.coroutines.launch
  */
 data class CalibrationUiState(
     val isActive: Boolean = false,
-    val countdownSeconds: Int = 0,  // 카운트다운 (3, 2, 1, 0)
     val currentMaxSpeed: Float = 0f,
     val calibrationData: CalibrationData = CalibrationData(),
     val waitingForDistance: Boolean = false,
@@ -29,9 +28,6 @@ data class CalibrationUiState(
     
     val isComplete: Boolean
         get() = calibrationData.isValid
-    
-    val isCountingDown: Boolean
-        get() = countdownSeconds > 0
 }
 
 /**
@@ -119,10 +115,10 @@ class CalibrationViewModel(
     }
     
     /**
-     * 측정 시작 (설정된 시간만큼 카운트다운 후)
+     * 측정 시작 (즉시 시작)
      */
     fun startMeasurement() {
-        if (_uiState.value.isActive || _uiState.value.isCountingDown) return
+        if (_uiState.value.isActive) return
         
         // 센서 감지기 리셋 (이전 데이터 초기화)
         strokeDetector.reset()
@@ -131,33 +127,15 @@ class CalibrationViewModel(
         _uiState.value = _uiState.value.copy(
             waitingForDistance = false,
             currentMaxSpeed = 0f,
-            error = null
+            error = null,
+            isActive = true
         )
         
-        // 설정된 카운트다운 시간 읽기
-        val countdownDuration = sharedPreferences.getInt("countdown_duration", 3)
+        // 측정 시작
+        strokeDetector.startMeasurement()
         
-        // 카운트다운 시작 (0이면 즉시 시작)
+        // 측정 시작을 모바일에 알림
         viewModelScope.launch {
-            if (countdownDuration > 0) {
-                for (i in countdownDuration downTo 1) {
-                    _uiState.value = _uiState.value.copy(
-                        countdownSeconds = i
-                    )
-                    kotlinx.coroutines.delay(1000)
-                }
-            }
-            
-            // 카운트다운 완료 후 측정 시작
-            _uiState.value = _uiState.value.copy(
-                isActive = true,
-                countdownSeconds = 0
-            )
-            
-            // 이 시점에 측정 시작
-            strokeDetector.startMeasurement()
-            
-            // 측정 시작을 모바일에 알림
             sendCalibrationStateToMobile()
         }
     }
@@ -168,7 +146,6 @@ class CalibrationViewModel(
     fun stopMeasurement() {
         _uiState.value = _uiState.value.copy(
             isActive = false,
-            countdownSeconds = 0,
             currentMaxSpeed = 0f
         )
         // 측정 중지를 모바일에 알림
@@ -184,7 +161,6 @@ class CalibrationViewModel(
         // 현재 측정 중지
         _uiState.value = _uiState.value.copy(
             isActive = false,
-            countdownSeconds = 0,
             currentMaxSpeed = 0f
         )
         

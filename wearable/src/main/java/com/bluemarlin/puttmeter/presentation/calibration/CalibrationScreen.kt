@@ -62,12 +62,6 @@ fun CalibrationScreen(
                     }
                 )
             }
-            uiState.isCountingDown -> {
-                CountdownScreen(
-                    countdownSeconds = uiState.countdownSeconds,
-                    onCancel = { viewModel.stopMeasurement() }
-                )
-            }
             uiState.isActive -> {
                 ActiveCalibrationScreen(
                     currentSpeed = uiState.currentMaxSpeed,
@@ -189,64 +183,6 @@ fun IdleCalibrationScreen(
                 ) {
                     Text("초기화")
                 }
-            }
-        }
-    }
-}
-
-@Composable
-fun CountdownScreen(
-    countdownSeconds: Int,
-    onCancel: () -> Unit
-) {
-    val context = LocalContext.current
-    val haptic = remember { HapticFeedback(context) }
-    
-    // 카운트다운 숫자가 바뀔 때마다 진동
-    LaunchedEffect(countdownSeconds) {
-        haptic.tapStart()  // 가벼운 진동
-    }
-    
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colors.background),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(24.dp),
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Text(
-                text = "준비",
-                style = MaterialTheme.typography.title2,
-                color = MaterialTheme.colors.primary
-            )
-            
-            // 카운트다운 숫자
-            Text(
-                text = countdownSeconds.toString(),
-                fontSize = 72.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colors.primary
-            )
-            
-            Text(
-                text = "자세를 잡으세요",
-                style = MaterialTheme.typography.body1,
-                color = MaterialTheme.colors.onSurface
-            )
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            // 취소 버튼
-            Button(
-                onClick = onCancel,
-                modifier = Modifier.fillMaxWidth(0.8f),
-                colors = ButtonDefaults.secondaryButtonColors()
-            ) {
-                Text("취소")
             }
         }
     }
