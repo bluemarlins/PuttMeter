@@ -71,6 +71,16 @@ fun SettingsScreen(
                     onBack = { selectedOption = null }
                 )
             }
+            SettingsOption.IDLE_SENSITIVITY -> {
+                IdleSensitivityScreen(
+                    currentSensitivity = uiState.idleSensitivity,
+                    onSensitivitySelected = { sensitivity ->
+                        viewModel.setIdleSensitivity(sensitivity)
+                        selectedOption = null
+                    },
+                    onBack = { selectedOption = null }
+                )
+            }
             SettingsOption.SENSOR_CHECK -> {
                 // 센서 체크는 별도 화면으로 이동
                 LaunchedEffect(Unit) {
@@ -97,6 +107,7 @@ enum class SettingsOption {
     CALIBRATION_COUNT,
     SPEED_ALGORITHM,
     COUNTDOWN_DURATION,
+    IDLE_SENSITIVITY,
     SENSOR_CHECK
 }
 
@@ -179,6 +190,23 @@ fun SettingsMenuScreen(
                         Text("카운트다운 시간")
                         Text(
                             text = if (uiState.countdownDuration == 0) "즉시 시작" else "${uiState.countdownDuration}초",
+                            style = MaterialTheme.typography.caption2
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        
+        // 정지 감도
+        item {
+            Chip(
+                onClick = { onOptionSelected(SettingsOption.IDLE_SENSITIVITY) },
+                label = {
+                    Column {
+                        Text("정지 감도")
+                        Text(
+                            text = "현재: ${uiState.idleSensitivity}단계",
                             style = MaterialTheme.typography.caption2
                         )
                     }
@@ -373,6 +401,126 @@ fun CountdownDurationScreen(
                 },
                 modifier = Modifier.fillMaxWidth(0.9f),
                 colors = if (index == currentDuration) {
+                    ChipDefaults.primaryChipColors()
+                } else {
+                    ChipDefaults.secondaryChipColors()
+                }
+            )
+        }
+        
+        // 뒤로 가기
+        item {
+            Button(
+                onClick = onBack,
+                modifier = Modifier.fillMaxWidth(0.9f),
+                colors = ButtonDefaults.secondaryButtonColors()
+            ) {
+                Text("뒤로")
+            }
+        }
+    }
+}
+
+/**
+ * 정지 감도 선택 화면
+ */
+@Composable
+fun IdleSensitivityScreen(
+    currentSensitivity: Int,
+    onSensitivitySelected: (Int) -> Unit,
+    onBack: () -> Unit
+) {
+    ScalingLazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colors.background),
+        contentPadding = PaddingValues(
+            top = 32.dp,
+            bottom = 32.dp,
+            start = 16.dp,
+            end = 16.dp
+        ),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // 타이틀
+        item {
+            Text(
+                text = "정지 감도",
+                style = MaterialTheme.typography.title2,
+                color = MaterialTheme.colors.primary
+            )
+        }
+        
+        // 현재 설정
+        item {
+            Card(
+                onClick = {},
+                enabled = false,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "현재 설정",
+                        style = MaterialTheme.typography.caption1,
+                        color = MaterialTheme.colors.onSurfaceVariant
+                    )
+                    Text(
+                        text = "${currentSensitivity}단계",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Green
+                    )
+                    Text(
+                        text = when (currentSensitivity) {
+                            1 -> "매우 둔감 (큰 움직임만)"
+                            2 -> "둔감"
+                            3 -> "보통 (권장)"
+                            4 -> "민감"
+                            5 -> "매우 민감 (작은 움직임도)"
+                            else -> "보통"
+                        },
+                        style = MaterialTheme.typography.caption2,
+                        color = MaterialTheme.colors.onSurfaceVariant
+                    )
+                }
+            }
+        }
+        
+        // 감도 선택 옵션 (1~5)
+        items(5) { index ->
+            val level = index + 1
+            Chip(
+                onClick = { onSensitivitySelected(level) },
+                label = {
+                    Column {
+                        Text(
+                            text = "${level}단계",
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Center,
+                            fontWeight = if (level == currentSensitivity) FontWeight.Bold else FontWeight.Normal
+                        )
+                        Text(
+                            text = when (level) {
+                                1 -> "매우 둔감"
+                                2 -> "둔감"
+                                3 -> "보통 (권장)"
+                                4 -> "민감"
+                                5 -> "매우 민감"
+                                else -> ""
+                            },
+                            style = MaterialTheme.typography.caption3,
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colors.onSurfaceVariant
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(0.9f),
+                colors = if (level == currentSensitivity) {
                     ChipDefaults.primaryChipColors()
                 } else {
                     ChipDefaults.secondaryChipColors()

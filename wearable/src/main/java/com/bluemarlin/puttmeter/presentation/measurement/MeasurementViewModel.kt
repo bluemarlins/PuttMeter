@@ -72,9 +72,9 @@ class MeasurementViewModel(
     private val idleThreshold = 2000L  // 2초 정지 감지
     private var idleStartTime = 0L
 
-    // 변화량 기반 임계값
-    private val accelDeltaThreshold = 0.5f
-    private val gyroDeltaThreshold = 0.3f
+    // 변화량 기반 임계값 (감도에 따라 조정)
+    private var accelDeltaThreshold = 0.5f
+    private var gyroDeltaThreshold = 0.3f
 
     // 이전 센서 값 저장용
     private var previousAccelMagnitude = 0f
@@ -96,6 +96,10 @@ class MeasurementViewModel(
         } catch (e: Exception) {
             SpeedAlgorithm.SENSOR_FUSION
         }
+        
+        // 저장된 정지 감도 로드 및 임계값 설정
+        val idleSensitivity = sharedPreferences.getInt("idle_sensitivity", 3)
+        updateIdleSensitivity(idleSensitivity)
 
         // 스트로크 감지기 생성
         strokeDetector = SimpleStrokeDetector(
@@ -139,6 +143,38 @@ class MeasurementViewModel(
     }
     
     /**
+     * 정지 감도 업데이트
+     * @param sensitivity 1~5 (1=매우 둔감, 3=보통, 5=매우 민감)
+     */
+    private fun updateIdleSensitivity(sensitivity: Int) {
+        // 감도에 따라 임계값 조정
+        // 감도가 높을수록 (5) 임계값이 낮아짐 (작은 움직임도 감지)
+        // 감도가 낮을수록 (1) 임계값이 높아짐 (큰 움직임만 감지)
+        when (sensitivity) {
+            1 -> {
+                accelDeltaThreshold = 1.5f   // 매우 둔감
+                gyroDeltaThreshold = 1.0f
+            }
+            2 -> {
+                accelDeltaThreshold = 1.0f   // 둔감
+                gyroDeltaThreshold = 0.7f
+            }
+            3 -> {
+                accelDeltaThreshold = 0.5f   // 보통 (기본값)
+                gyroDeltaThreshold = 0.3f
+            }
+            4 -> {
+                accelDeltaThreshold = 0.3f   // 민감
+                gyroDeltaThreshold = 0.2f
+            }
+            5 -> {
+                accelDeltaThreshold = 0.2f   // 매우 민감
+                gyroDeltaThreshold = 0.1f
+            }
+        }
+    }
+    
+    /**
      * 설정 변경 감지
      */
     private fun observeSettingsChanges() {
@@ -157,6 +193,10 @@ class MeasurementViewModel(
                         SpeedAlgorithm.SENSOR_FUSION
                     }
                     recreateDetector(algorithm)
+                }
+                "idle_sensitivity" -> {
+                    val sensitivity = sharedPreferences.getInt("idle_sensitivity", 3)
+                    updateIdleSensitivity(sensitivity)
                 }
             }
         }
