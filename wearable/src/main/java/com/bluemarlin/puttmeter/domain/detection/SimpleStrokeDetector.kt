@@ -33,6 +33,12 @@ class SimpleStrokeDetector(
     private val _currentMaxSpeed = MutableStateFlow(0f)
     val currentMaxSpeed: StateFlow<Float> = _currentMaxSpeed.asStateFlow()
     
+    private val _currentSpeed = MutableStateFlow(0f)
+    val currentSpeed: StateFlow<Float> = _currentSpeed.asStateFlow()
+    
+    private val _isInSwing = MutableStateFlow(false)
+    val isInSwingState: StateFlow<Boolean> = _isInSwing.asStateFlow()
+    
     // 센서 데이터 버퍼
     private val sensorBuffer = mutableListOf<SensorData>()
     private val maxBufferSize = 200 // 2초 @ 100Hz
@@ -42,25 +48,30 @@ class SimpleStrokeDetector(
     private var maxSpeed = 0f
     private var maxSpeedTimestamp = 0L
     
-    // 움직임 감지 상태
+    // 스윙 상태 추적
+    private var isInSwing = false  // 현재 스윙 중인지
+    private var swingStartTime = 0L
+    private var swingEndDetectionTime = 0L
     private var lastSignificantMotionTime = 0L
-    private val motionTimeout = 2000L // 2초간 움직임이 없으면 자동으로 측정 완료
+    private var speedPeakReachedTime = 0L  // 최대 속도 도달 시간
+    private var isPeakReached = false  // 최대 속도에 도달했는지
     
-    // 초기 안정화 시간
-    private val stabilizationTime = 500L // 측정 시작 후 0.5초는 무시
+    // 스윙 감지 임계값
+    private val swingStartThreshold = 0.3f  // 스윙 시작 속도 (m/s)
+    private val swingEndIdleTime = 500L  // 스윙 종료 판단 시간 (500ms 정지)
+    private val minSwingDuration = 150L  // 최소 스윙 시간 (150ms)
+    private val motionThreshold = 1.0f  // 움직임 감지 임계값 (1.0 m/s²)
+    private val maxSwingDuration = 5000L  // 최대 스윙 시간 (5초 타임아웃)
+    
+    // 초기 안정화 시간 (새 UX에서는 필요 없음)
+    private val stabilizationTime = 0L  // 0ms - 즉시 측정 시작
 
     // 이전 평활화된 값
     private var previousSmoothedMagnitude = 0f
-
-    // 스윙 감지용 변수들
-    private var previousMaxSpeed = 0f
-    private var lastSwingTime = 0L
-    private val minSwingInterval = 500L // 최소 스윙 간격 (500ms)
     
     // 스윙 각도 계산용 변수들
-    private var swingStartTime = 0L
-    private var totalSwingAngle = 0f // 누적 스윙 각도 (라디안)
-    private var maxSwingAngle = 0f   // 최대 스윙 각도 (라디안)
+    private var addressAngle = 0f    // 어드레스 자세 각도 (라디안)
+    private var maxBackswingAngle = 0f   // 백스윙 최대 각도 (라디안)
     
     /**
      * 측정 시작
@@ -72,13 +83,18 @@ class SimpleStrokeDetector(
         maxSpeedTimestamp = 0L
         lastSignificantMotionTime = measurementStartTime
         previousSmoothedMagnitude = 0f
-        // 스윙 감지 변수 초기화
-        previousMaxSpeed = 0f
-        lastSwingTime = measurementStartTime
+        
+        // 스윙 상태 초기화
+        isInSwing = false
+        swingStartTime = 0L
+        swingEndDetectionTime = 0L
+        speedPeakReachedTime = 0L
+        isPeakReached = false
+        
         // 스윙 각도 변수 초기화
-        swingStartTime = measurementStartTime
-        totalSwingAngle = 0f
-        maxSwingAngle = 0f
+        addressAngle = 0f
+        maxBackswingAngle = 0f
+        
         sensorBuffer.clear()
         _currentMaxSpeed.value = 0f
     }
@@ -126,20 +142,8 @@ class SimpleStrokeDetector(
         )
         previousSmoothedMagnitude = smoothedMagnitude
         
-        // 스윙 각도 계산 (자이로스코프 각속도 적분)
-        val gyroMagnitude = sensorData.gyroscope.magnitude() // rad/s
-        val dt = if (sensorBuffer.size > 1) {
-            (sensorData.timestamp - sensorBuffer[sensorBuffer.size - 2].timestamp).toFloat() / 1000f // 초 단위
-        } else {
-            0.01f // 기본값 100Hz
-        }
-        val deltaAngle = gyroMagnitude * dt // 라디안
-        totalSwingAngle += deltaAngle
-        
-        // 최대 스윙 각도 추적
-        if (totalSwingAngle > maxSwingAngle) {
-            maxSwingAngle = totalSwingAngle
-        }
+        // 스윙 각도 계산 (가속도계 기반 - 지면 대비 절대 각도)
+        val currentAngle = calculateTiltAngle(sensorData.acceleration)
         
         // 선택된 알고리즘으로 속도 추정
         val speed = when (algorithm) {
@@ -149,48 +153,112 @@ class SimpleStrokeDetector(
             SpeedAlgorithm.PEAK_ACCELERATION -> estimateSpeedFromPeak()
         }
         
-        // 최대 속도 업데이트
-        if (speed > maxSpeed) {
-            maxSpeed = speed
-            maxSpeedTimestamp = sensorData.timestamp
-            _currentMaxSpeed.value = speed
-        }
-
-        // 실시간 스윙 감지: 속도가 1.0~2.0 m/s 범위에 도달하고 최소 간격이 지났으면 스윙으로 간주
-        val isValidPuttingSpeed = speed in 1.0f..2.0f
-        val timeSinceLastSwing = sensorData.timestamp - lastSwingTime
-
-        if (isValidPuttingSpeed && timeSinceLastSwing > minSwingInterval) {
-            // 새로운 스윙 감지
-            val strokeSpeed = speed  // 현재 속도를 사용
-            val predictedDistance = predictDistanceFromSpeed(strokeSpeed)
-            val swingTimeDuration = sensorData.timestamp - swingStartTime
-            
-            // 스윙 각도를 도(degree)로 변환
-            val swingAngleDegrees = Math.toDegrees(maxSwingAngle.toDouble()).toFloat()
-
-            val stroke = SimplePuttStroke(
-                timestamp = sensorData.timestamp,
-                maxSpeed = strokeSpeed,
-                predictedDistance = predictedDistance.coerceIn(0.1f, 15.0f),
-                swingTime = swingTimeDuration,
-                swingAngle = swingAngleDegrees
-            )
-
-            _detectedStroke.value = stroke
-
-            // 다음 스윙을 위해 변수들 리셋
-            maxSpeed = 0f
-            lastSwingTime = sensorData.timestamp
-            swingStartTime = sensorData.timestamp
-            totalSwingAngle = 0f
-            maxSwingAngle = 0f
-        }
+        // 현재 속도 업데이트 (디버깅용)
+        _currentSpeed.value = speed
         
-        // 움직임 감지 (타임아웃 없이 계속 측정)
-        if (smoothedMagnitude > 0.3f) { // 움직임 임계값 (완화)
+        // 스윙 상태 관리
+        val hasMotion = smoothedMagnitude > motionThreshold  // 1.0f로 높임
+        
+        if (hasMotion) {
             lastSignificantMotionTime = sensorData.timestamp
         }
+        
+        // 스윙 시작 감지
+        if (!isInSwing && speed > swingStartThreshold) {
+            // 스윙 시작 - 현재 각도를 어드레스 각도로 저장
+            isInSwing = true
+            _isInSwing.value = true
+            swingStartTime = sensorData.timestamp
+            maxSpeed = 0f
+            maxSpeedTimestamp = 0L
+            addressAngle = currentAngle  // 어드레스 자세 각도 기준
+            maxBackswingAngle = 0f
+            isPeakReached = false
+            speedPeakReachedTime = 0L
+            _currentMaxSpeed.value = 0f
+        }
+        
+        // 스윙 진행 중
+        if (isInSwing) {
+            val swingElapsedTime = sensorData.timestamp - swingStartTime
+            
+            // 타임아웃 체크 (5초)
+            if (swingElapsedTime >= maxSwingDuration) {
+                // 타임아웃 - 스윙 강제 종료
+                if (maxSpeed >= 0.5f) {
+                    completeSwingDetection(sensorData.timestamp)
+                } else {
+                    // 유효하지 않은 스윙 - 리셋만
+                    isInSwing = false
+                    _isInSwing.value = false
+                    maxSpeed = 0f
+                    _currentMaxSpeed.value = 0f
+                }
+                return
+            }
+            
+            // 백스윙 각도 추적
+            val backswingAngle = kotlin.math.abs(currentAngle - addressAngle)
+            if (backswingAngle > maxBackswingAngle) {
+                maxBackswingAngle = backswingAngle
+            }
+            
+            // 최대 속도 업데이트 및 피크 감지
+            if (speed > maxSpeed) {
+                maxSpeed = speed
+                maxSpeedTimestamp = sensorData.timestamp
+                _currentMaxSpeed.value = speed
+                isPeakReached = false  // 새로운 피크이므로 리셋
+            } else if (!isPeakReached && maxSpeed >= 0.5f && speed < maxSpeed * 0.7f) {
+                // 피크 도달 감지: 최대 속도의 70% 이하로 떨어지면
+                isPeakReached = true
+                speedPeakReachedTime = sensorData.timestamp
+            }
+            
+            // 스윙 종료 감지
+            val idleTime = sensorData.timestamp - lastSignificantMotionTime
+            val timeSincePeak = if (isPeakReached) sensorData.timestamp - speedPeakReachedTime else 0L
+            
+            // 종료 조건: 
+            // 1. 피크 도달 후 500ms 정지, 또는
+            // 2. 피크 도달 후 1초 경과
+            if (isPeakReached && (idleTime >= swingEndIdleTime || timeSincePeak >= 1000L)) {
+                completeSwingDetection(sensorData.timestamp)
+            }
+        }
+    }
+    
+    /**
+     * 스윙 완료 처리
+     */
+    private fun completeSwingDetection(currentTime: Long) {
+        val swingDuration = maxSpeedTimestamp - swingStartTime
+        
+        // 유효한 스윙인지 검증
+        if (swingDuration >= minSwingDuration && maxSpeed >= 0.5f) {
+            // 백스윙 각도를 도(degree)로 변환
+            val backswingAngleDegrees = Math.toDegrees(maxBackswingAngle.toDouble()).toFloat()
+            
+            // 거리 예측
+            val predictedDistance = predictDistanceFromSpeed(maxSpeed)
+            
+            val stroke = SimplePuttStroke(
+                timestamp = maxSpeedTimestamp,
+                maxSpeed = maxSpeed,
+                predictedDistance = predictedDistance.coerceAtLeast(0f),  // 음수만 방지
+                swingTime = swingDuration,
+                swingAngle = backswingAngleDegrees
+            )
+            
+            _detectedStroke.value = stroke
+        }
+        
+        // 스윙 상태 리셋
+        isInSwing = false
+        _isInSwing.value = false
+        maxSpeed = 0f
+        _currentMaxSpeed.value = 0f
+        isPeakReached = false
     }
     
     /**
@@ -278,15 +346,15 @@ class SimpleStrokeDetector(
         // 거리 예측: 새로운 속도-거리 관계 기반
         val predictedDistance = predictDistanceFromSpeed(maxSpeed)
         
-        // 스윙 각도를 도(degree)로 변환
-        val swingAngleDegrees = Math.toDegrees(maxSwingAngle.toDouble()).toFloat()
+        // 백스윙 각도를 도(degree)로 변환
+        val backswingAngleDegrees = Math.toDegrees(maxBackswingAngle.toDouble()).toFloat()
         
         val stroke = SimplePuttStroke(
             timestamp = maxSpeedTimestamp,
             maxSpeed = maxSpeed,
-            predictedDistance = predictedDistance.coerceIn(0.1f, 15.0f), // 0.1m ~ 15m
+            predictedDistance = predictedDistance.coerceAtLeast(0f),  // 음수만 방지
             swingTime = elapsedTime,
-            swingAngle = swingAngleDegrees
+            swingAngle = backswingAngleDegrees
         )
         
         _detectedStroke.value = stroke
@@ -304,6 +372,23 @@ class SimpleStrokeDetector(
      */
     fun updateCalibrationFactor(factor: Float) {
         calibrationFactor = factor
+    }
+    
+    /**
+     * 가속도계를 사용하여 지면 대비 기울기 각도 계산
+     * 퍼터가 지면과 수직(어드레스 자세) = 0도
+     * 백스윙 시 기울어진 각도를 측정
+     */
+    private fun calculateTiltAngle(acceleration: Vector3): Float {
+        // 가속도 벡터의 크기
+        val magnitude = acceleration.magnitude()
+        if (magnitude < 1f) return 0f  // 너무 작으면 무시
+        
+        // X-Z 평면에서의 각도 계산 (백스윙 동작)
+        // atan2(x, z)를 사용하여 중력 방향 대비 기울기 계산
+        val angleRadians = kotlin.math.atan2(acceleration.x, acceleration.z)
+        
+        return angleRadians  // 라디안 반환
     }
     
     /**
@@ -325,19 +410,25 @@ class SimpleStrokeDetector(
         _isActive.value = false
         _detectedStroke.value = null
         _currentMaxSpeed.value = 0f
+        _currentSpeed.value = 0f
+        _isInSwing.value = false
         sensorBuffer.clear()
         maxSpeed = 0f
         maxSpeedTimestamp = 0L
         measurementStartTime = 0L
         lastSignificantMotionTime = 0L
         previousSmoothedMagnitude = 0f
-        // 스윙 감지 변수 초기화
-        previousMaxSpeed = 0f
-        lastSwingTime = 0L
-        // 스윙 각도 변수 초기화
+        
+        // 스윙 상태 초기화
+        isInSwing = false
         swingStartTime = 0L
-        totalSwingAngle = 0f
-        maxSwingAngle = 0f
+        swingEndDetectionTime = 0L
+        speedPeakReachedTime = 0L
+        isPeakReached = false
+        
+        // 스윙 각도 변수 초기화
+        addressAngle = 0f
+        maxBackswingAngle = 0f
     }
 }
 

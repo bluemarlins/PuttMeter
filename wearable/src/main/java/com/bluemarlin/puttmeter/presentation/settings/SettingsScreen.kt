@@ -51,16 +51,6 @@ fun SettingsScreen(
                     onBack = { selectedOption = null }
                 )
             }
-            SettingsOption.CALIBRATION_FACTOR -> {
-                CalibrationFactorScreen(
-                    currentFactor = uiState.calibrationFactor,
-                    onFactorChanged = { factor ->
-                        viewModel.setCalibrationFactor(factor)
-                        selectedOption = null
-                    },
-                    onBack = { selectedOption = null }
-                )
-            }
             SettingsOption.SPEED_ALGORITHM -> {
                 SpeedAlgorithmScreen(
                     currentAlgorithm = uiState.speedAlgorithm,
@@ -105,7 +95,6 @@ fun SettingsScreen(
  */
 enum class SettingsOption {
     CALIBRATION_COUNT,
-    CALIBRATION_FACTOR,
     SPEED_ALGORITHM,
     COUNTDOWN_DURATION,
     SENSOR_CHECK
@@ -151,23 +140,6 @@ fun SettingsMenuScreen(
                         Text("거리 보정 횟수")
                         Text(
                             text = "현재: ${uiState.calibrationCount}회",
-                            style = MaterialTheme.typography.caption2
-                        )
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-        
-        // 보정 계수 변경
-        item {
-            Chip(
-                onClick = { onOptionSelected(SettingsOption.CALIBRATION_FACTOR) },
-                label = {
-                    Column {
-                        Text("보정 계수 변경")
-                        Text(
-                            text = "현재: %.2f".format(uiState.calibrationFactor),
                             style = MaterialTheme.typography.caption2
                         )
                     }
@@ -416,151 +388,6 @@ fun CountdownDurationScreen(
                 colors = ButtonDefaults.secondaryButtonColors()
             ) {
                 Text("뒤로")
-            }
-        }
-    }
-}
-
-/**
- * 보정 계수 변경 화면
- */
-@Composable
-fun CalibrationFactorScreen(
-    currentFactor: Float,
-    onFactorChanged: (Float) -> Unit,
-    onBack: () -> Unit
-) {
-    var factorText by remember { mutableStateOf(currentFactor.toString()) }
-    
-    ScalingLazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colors.background),
-        contentPadding = PaddingValues(
-            top = 24.dp,
-            bottom = 24.dp,
-            start = 16.dp,
-            end = 16.dp
-        ),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        // 타이틀
-        item {
-            Text(
-                text = "보정 계수 변경",
-                style = MaterialTheme.typography.title3,
-                color = MaterialTheme.colors.primary
-            )
-        }
-        
-        // 현재 계수 표시
-        item {
-            Card(
-                onClick = {},
-                enabled = false,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = "현재 계수",
-                        style = MaterialTheme.typography.caption2,
-                        color = MaterialTheme.colors.onSurfaceVariant
-                    )
-                    Text(
-                        text = if (factorText.isEmpty()) "0.00" else factorText,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colors.primary
-                    )
-                }
-            }
-        }
-        
-        // 숫자 패드 - 첫 번째 줄
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                NumberButton("1", Modifier.weight(1f)) { factorText += "1" }
-                NumberButton("2", Modifier.weight(1f)) { factorText += "2" }
-                NumberButton("3", Modifier.weight(1f)) { factorText += "3" }
-            }
-        }
-        
-        // 숫자 패드 - 두 번째 줄
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                NumberButton("4", Modifier.weight(1f)) { factorText += "4" }
-                NumberButton("5", Modifier.weight(1f)) { factorText += "5" }
-                NumberButton("6", Modifier.weight(1f)) { factorText += "6" }
-            }
-        }
-        
-        // 숫자 패드 - 세 번째 줄
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                NumberButton("7", Modifier.weight(1f)) { factorText += "7" }
-                NumberButton("8", Modifier.weight(1f)) { factorText += "8" }
-                NumberButton("9", Modifier.weight(1f)) { factorText += "9" }
-            }
-        }
-        
-        // 숫자 패드 - 네 번째 줄
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                NumberButton(".", Modifier.weight(1f)) {
-                    if (!factorText.contains(".")) {
-                        factorText += "."
-                    }
-                }
-                NumberButton("0", Modifier.weight(1f)) { factorText += "0" }
-                NumberButton("←", Modifier.weight(1f)) {
-                    if (factorText.isNotEmpty()) {
-                        factorText = factorText.dropLast(1)
-                    }
-                }
-            }
-        }
-        
-        // 확인 버튼
-        item {
-            Button(
-                onClick = {
-                    val factor = factorText.toFloatOrNull()
-                    if (factor != null && factor > 0f && factor <= 10f) {
-                        onFactorChanged(factor)
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(0.95f),
-                enabled = factorText.isNotEmpty() && 
-                          factorText.toFloatOrNull()?.let { it > 0f && it <= 10f } == true
-            ) {
-                Text("저장")
-            }
-        }
-        
-        // 취소 버튼
-        item {
-            Button(
-                onClick = onBack,
-                modifier = Modifier.fillMaxWidth(0.95f),
-                colors = ButtonDefaults.secondaryButtonColors()
-            ) {
-                Text("취소")
             }
         }
     }

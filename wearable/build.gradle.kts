@@ -4,6 +4,10 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
 android {
     namespace = "com.bluemarlin.puttmeter.wearable"
     compileSdk = 36
@@ -35,6 +39,25 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+    
+    applicationVariants.all {
+        val variant = this
+        val buildDateTime = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        
+        variant.outputs.all {
+            val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
+            val originalFile = output.outputFileName
+            
+            // APK 파일명 형식: PuttMeter-wearable-{buildType}-v{versionName}-{buildDateTime}.apk
+            // 예: PuttMeter-wearable-debug-v1.0-20241016_143025.apk
+            val newFileName = originalFile.replace(
+                "wearable-",
+                "wearable-${variant.buildType.name}-v${variant.versionName}-${buildDateTime}-"
+            ).replace("--", "-")
+            
+            output.outputFileName = newFileName
+        }
     }
 }
 
