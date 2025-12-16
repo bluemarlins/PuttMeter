@@ -5,7 +5,6 @@ import android.content.SharedPreferences
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bluemarlin.puttmeter.wearable.data.sensor.SensorDataSource
-import com.bluemarlin.puttmeter.wearable.data.wearable.*
 import com.bluemarlin.puttmeter.wearable.domain.detection.SimpleStrokeDetector
 import com.bluemarlin.puttmeter.wearable.domain.detection.SimplePuttStroke
 import com.bluemarlin.puttmeter.wearable.domain.detection.SpeedAlgorithm
@@ -44,7 +43,9 @@ data class MeasurementUiState(
     val idleProgress: Float = 0f,  // 정지 상태 진행률 (0.0 ~ 1.0)
     val debugCurrentSpeed: Float = 0f,  // 현재 속도 (디버깅)
     val debugIsInSwing: Boolean = false,  // 스윙 중인지 (디버깅)
-    val isWristUp: Boolean = false  // Wrist Up 상태 (화면 보는 중)
+    val isWristUp: Boolean = false,  // Wrist Up 상태 (화면 보는 중)
+    val debugAccelDirectionDotProduct: Float = 1.0f,  // 가속도 방향 내적 (-1 ~ 1)
+    val debugIsAccelDirectionStable: Boolean = false  // 가속도 방향이 안정적인지
 )
 
 /**
@@ -61,7 +62,6 @@ class MeasurementViewModel(
     private val sharedPreferences: SharedPreferences =
         context.getSharedPreferences("putt_meter_prefs", Context.MODE_PRIVATE)
 
-    private val wearableDataSender = WearableDataSender(context)
     private var sessionStartTime = 0L
     
     // 센서 수집 Job 관리
@@ -85,7 +85,12 @@ class MeasurementViewModel(
     private var strokeDetector: SimpleStrokeDetector
     
     init {
-        // 저장된 캘리브레이션 계수 로드
+        // 저장된 캘리브레이션 파라미터 로드 (회귀분석 결과)
+        // 기본값: 0 m/s = 0 m, 1 m/s = 2 m, 2 m/s = 10 m (이차 방정식: distance = 3*speed² - 1*speed)
+        val slope = sharedPreferences.getFloat("calibration_slope", 3.0f)
+        val intercept = sharedPreferences.getFloat("calibration_intercept", -1.0f)
+        
+        // 하위 호환성을 위해 calibrationFactor도 유지
         val calibrationFactor = sharedPreferences.getFloat("calibration_factor", 1.0f)
         _uiState.value = _uiState.value.copy(calibrationFactor = calibrationFactor)
 
@@ -107,21 +112,14 @@ class MeasurementViewModel(
 
         // 스트로크 감지기 생성
         strokeDetector = SimpleStrokeDetector(
-            calibrationFactor = calibrationFactor,
+            slope = slope,
+            intercept = intercept,
             algorithm = algorithm,
             swingStartThreshold = swingStartThreshold
         )
 
         // 설정 변경 감지
         observeSettingsChanges()
-
-        // 주기적 하트비트 전송 (5초마다)
-        viewModelScope.launch {
-            while (true) {
-                kotlinx.coroutines.delay(5000)
-                sendAppStateToMobile()
-            }
-        }
 
         // 스트로크 감지 결과 관찰
         viewModelScope.launch {
@@ -143,6 +141,19 @@ class MeasurementViewModel(
         viewModelScope.launch {
             strokeDetector.isInSwingState.collect { inSwing ->
                 _uiState.value = _uiState.value.copy(debugIsInSwing = inSwing)
+            }
+        }
+        
+        // 가속도 방향 정보 관찰 (디버깅용)
+        viewModelScope.launch {
+            strokeDetector.accelDirectionDotProduct.collect { dotProduct ->
+                _uiState.value = _uiState.value.copy(debugAccelDirectionDotProduct = dotProduct)
+            }
+        }
+        
+        viewModelScope.launch {
+            strokeDetector.isAccelDirectionStable.collect { isStable ->
+                _uiState.value = _uiState.value.copy(debugIsAccelDirectionStable = isStable)
             }
         }
     }
@@ -203,10 +214,11 @@ class MeasurementViewModel(
     private fun observeSettingsChanges() {
         sharedPreferences.registerOnSharedPreferenceChangeListener { _, key ->
             when (key) {
-                "calibration_factor" -> {
-                    val newFactor = sharedPreferences.getFloat("calibration_factor", 1.0f)
-                    _uiState.value = _uiState.value.copy(calibrationFactor = newFactor)
-                    strokeDetector.updateCalibrationFactor(newFactor)
+                "calibration_slope", "calibration_intercept" -> {
+                    // 기본값: 0 m/s = 0 m, 1 m/s = 2 m, 2 m/s = 10 m (이차 방정식)
+                    val newSlope = sharedPreferences.getFloat("calibration_slope", 3.0f)
+                    val newIntercept = sharedPreferences.getFloat("calibration_intercept", -1.0f)
+                    strokeDetector.updateCalibration(newSlope, newIntercept)
                 }
                 "speed_algorithm" -> {
                     val algorithmName = sharedPreferences.getString("speed_algorithm", SpeedAlgorithm.SENSOR_FUSION.name)
@@ -234,9 +246,17 @@ class MeasurementViewModel(
      * Detector 재생성
      */
     private fun recreateDetector(algorithm: SpeedAlgorithm) {
+        // 기본값: 0 m/s = 0 m, 1 m/s = 2 m, 2 m/s = 10 m (이차 방정식)
+        val slope = sharedPreferences.getFloat("calibration_slope", 3.0f)
+        val intercept = sharedPreferences.getFloat("calibration_intercept", -1.0f)
+        val puttingSensitivity = sharedPreferences.getInt("putting_sensitivity", 3)
+        val swingStartThreshold = getPuttingThreshold(puttingSensitivity)
+        
         strokeDetector = SimpleStrokeDetector(
-            calibrationFactor = _uiState.value.calibrationFactor,
-            algorithm = algorithm
+            slope = slope,
+            intercept = intercept,
+            algorithm = algorithm,
+            swingStartThreshold = swingStartThreshold
         )
         
         // 스트로크 감지 결과 다시 구독
@@ -312,7 +332,9 @@ class MeasurementViewModel(
 
         // Wrist Up 감지 (손목을 들어 시계를 보는 자세)
         // Z축이 양수이고 큰 경우 = 중력이 손목에서 팔꿈치 방향
-        val isWristUp = sensorData.acceleration.z > 5.0f
+        // TODO: 잠시 주석 처리 - 시계를 손목 안쪽에 차고 있어서 Wrist Up 감지 불필요
+        // val isWristUp = sensorData.acceleration.z > 5.0f
+        val isWristUp = false  // 항상 false로 설정 (주석 처리된 기능)
         
         // 움직임 감지
         val hasMotion = accelDelta > accelDeltaThreshold || gyroDelta > gyroDeltaThreshold
@@ -324,17 +346,21 @@ class MeasurementViewModel(
         }
         
         // Wrist Up 상태일 때는 정지 타이머 리셋 (화면을 보는 중)
-        if (isWristUp) {
-            idleStartTime = currentTime
-        }
+        // TODO: 잠시 주석 처리 - 시계를 손목 안쪽에 차고 있어서 Wrist Up 감지 불필요
+        // if (isWristUp) {
+        //     idleStartTime = currentTime
+        // }
 
         // 정지 시간 및 진행률 계산 (Wrist Up이 아닐 때만)
-        val idleDuration = if (!isWristUp) currentTime - idleStartTime else 0L
-        val idleProgress = if (!isWristUp) {
-            (idleDuration.toFloat() / idleThreshold).coerceIn(0f, 1f)
-        } else {
-            0f
-        }
+        // TODO: 잠시 주석 처리 - Wrist Up 체크 없이 항상 정지 시간 계산
+        // val idleDuration = if (!isWristUp) currentTime - idleStartTime else 0L
+        // val idleProgress = if (!isWristUp) {
+        //     (idleDuration.toFloat() / idleThreshold).coerceIn(0f, 1f)
+        // } else {
+        //     0f
+        // }
+        val idleDuration = currentTime - idleStartTime
+        val idleProgress = (idleDuration.toFloat() / idleThreshold).coerceIn(0f, 1f)
         
         // UI 상태 업데이트 (Wrist Up 상태 포함)
         _uiState.value = _uiState.value.copy(
@@ -349,7 +375,9 @@ class MeasurementViewModel(
             }
             MeasurementState.PRACTICE -> {
                 // 연습 스윙 중 - 2초 정지 감지 (Wrist Up이 아닐 때만)
-                if (idleDuration >= idleThreshold && !hasMotion && !isWristUp) {
+                // TODO: 잠시 주석 처리 - Wrist Up 체크 없이 항상 정지 감지
+                // if (idleDuration >= idleThreshold && !hasMotion && !isWristUp) {
+                if (idleDuration >= idleThreshold && !hasMotion) {
                     transitionToReady()
                 }
             }
@@ -362,7 +390,9 @@ class MeasurementViewModel(
             }
             MeasurementState.RESULT -> {
                 // 결과 표시 중 - 2초 정지 감지 시 다음 측정 (Wrist Up이 아닐 때만)
-                if (idleDuration >= idleThreshold && !hasMotion && !isWristUp) {
+                // TODO: 잠시 주석 처리 - Wrist Up 체크 없이 항상 정지 감지
+                // if (idleDuration >= idleThreshold && !hasMotion && !isWristUp) {
+                if (idleDuration >= idleThreshold && !hasMotion) {
                     transitionToPractice()
                 }
             }
@@ -387,10 +417,6 @@ class MeasurementViewModel(
         // 센서 수집 시작
         if (sensorCollectionJob?.isActive != true) {
             startSensorCollection()
-        }
-        
-        viewModelScope.launch {
-            sendAppStateToMobile()
         }
     }
     
@@ -430,10 +456,6 @@ class MeasurementViewModel(
         // 스트로크 감지기 시작
         strokeDetector.reset()
         strokeDetector.startMeasurement()
-        
-        viewModelScope.launch {
-            sendAppStateToMobile()
-        }
     }
     
     /**
@@ -466,13 +488,6 @@ class MeasurementViewModel(
         
         // 스트로크 감지기 중지
         strokeDetector.stopMeasurement()
-        
-        // 결과를 모바일로 전송
-        viewModelScope.launch {
-            wearableDataSender.sendSimpleStrokeResult(stroke)
-            sendSessionStatsToMobile()
-            sendAppStateToMobile()
-        }
         
         // 정지 타이머 리셋
         isFirstSample = true
@@ -511,10 +526,6 @@ class MeasurementViewModel(
         _uiState.value = _uiState.value.copy(
             state = MeasurementState.IDLE
         )
-        
-        viewModelScope.launch {
-            sendAppStateToMobile()
-        }
     }
     
     /**
@@ -566,10 +577,6 @@ class MeasurementViewModel(
         _uiState.value = _uiState.value.copy(
             state = MeasurementState.IDLE
         )
-        
-        viewModelScope.launch {
-            sendAppStateToMobile()
-        }
     }
     
     /**
@@ -577,34 +584,6 @@ class MeasurementViewModel(
      */
     fun onScreenEnter() {
         // 센서 수집은 startMeasurement에서 시작
-        viewModelScope.launch {
-            sendAppStateToMobile()
-        }
-    }
-    
-    // ===== Wearable 데이터 전송 함수들 =====
-    
-    private suspend fun sendAppStateToMobile() {
-        val appState = AppStateData(
-            isWearAppActive = true,
-            isMeasuring = _uiState.value.state == MeasurementState.MEASURING
-        )
-        wearableDataSender.sendAppState(appState)
-    }
-    
-    private suspend fun sendSessionStatsToMobile() {
-        val state = _uiState.value
-        val strokes = state.sessionStrokes
-        
-        val sessionStats = SessionStatsData(
-            totalStrokes = strokes.size,
-            averageDistance = state.averageDistance,
-            bestDistance = strokes.maxOfOrNull { it.predictedDistance } ?: 0f,
-            averageStability = 1.0f,
-            averageSmoothness = 1.0f,
-            sessionStartTime = sessionStartTime
-        )
-        wearableDataSender.sendSessionStats(sessionStats)
     }
     
     override fun onCleared() {
@@ -613,37 +592,5 @@ class MeasurementViewModel(
         if (_uiState.value.state == MeasurementState.MEASURING) {
             strokeDetector.stopMeasurement()
         }
-        wearableDataSender.cleanup()
     }
-}
-
-// WearableDataSender 확장 함수
-private suspend fun WearableDataSender.sendSimpleStrokeResult(stroke: SimplePuttStroke) {
-    val metricsData = MetricsData(
-        peakAcceleration = 0f,
-        impactVelocity = stroke.maxSpeed,
-        impulse = 0f,
-        swingTime = stroke.swingTime,
-        addressTime = 0L,
-        backswingTime = 0L,
-        downswingTime = 0L,
-        followThroughTime = 0L,
-        tempoRatio = 0f,
-        backswingDistance = 0f,
-        followThroughDistance = 0f,
-        clubSpeed = stroke.maxSpeed,
-        impactForce = 0f,
-        addressStability = 1.0f,
-        finishStability = 1.0f,
-        smoothness = 1.0f
-    )
-    
-    val strokeData = StrokeResultData(
-        timestamp = stroke.timestamp,
-        predictedDistance = stroke.predictedDistance,
-        metrics = metricsData,
-        isValidStroke = true
-    )
-    
-    sendStrokeResult(strokeData)
 }

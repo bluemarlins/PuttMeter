@@ -21,5 +21,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "PuttMeter"
 include(":wearable")
-include(":mobile")
  

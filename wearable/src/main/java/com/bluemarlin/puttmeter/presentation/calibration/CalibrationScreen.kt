@@ -3,6 +3,7 @@ package com.bluemarlin.puttmeter.wearable.presentation.calibration
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,20 +30,10 @@ fun CalibrationScreen(
     val haptic = remember { HapticFeedback(context) }
     
     BackHandler {
-        onNavigateBack()
-    }
-    
-    // 측정 시작 시 진동 (카운트다운 종료)
-    LaunchedEffect(uiState.isActive) {
-        if (uiState.isActive) {
-            haptic.impactDetected()  // 측정 시작 알림
-        }
-    }
-    
-    // 측정 완료 시 진동
-    LaunchedEffect(uiState.waitingForDistance) {
-        if (uiState.waitingForDistance) {
-            haptic.measurementComplete()
+        when (uiState.state) {
+            CalibrationState.INPUT_DISTANCE -> viewModel.cancelDistanceInput()
+            CalibrationState.IDLE -> onNavigateBack()
+            else -> viewModel.cancelMeasurement()
         }
     }
     
@@ -50,30 +41,8 @@ fun CalibrationScreen(
         modifier = modifier,
         timeText = { TimeText() }
     ) {
-        when {
-            uiState.waitingForDistance -> {
-                DistanceInputScreen(
-                    measuredSpeed = uiState.lastMeasuredSpeed,
-                    onDistanceInput = { distance ->
-                        viewModel.inputActualDistance(distance)
-                    },
-                    onCancel = {
-                        viewModel.cancelCalibration()
-                    }
-                )
-            }
-            uiState.isActive -> {
-                ActiveCalibrationScreen(
-                    currentSpeed = uiState.currentMaxSpeed,
-                    onStop = { viewModel.stopMeasurement() },
-                    onComplete = { viewModel.completeSwing() },
-                    onRestart = {
-                        haptic.tapStart()
-                        viewModel.restartMeasurement()
-                    }
-                )
-            }
-            else -> {
+        when (uiState.state) {
+            CalibrationState.IDLE -> {
                 IdleCalibrationScreen(
                     uiState = uiState,
                     onStart = {
@@ -81,6 +50,32 @@ fun CalibrationScreen(
                         viewModel.startMeasurement()
                     },
                     onReset = { viewModel.resetCalibration() }
+                )
+            }
+            CalibrationState.PRACTICE -> {
+                PracticeCalibrationScreen(
+                    uiState = uiState,
+                    onCancel = { viewModel.cancelMeasurement() }
+                )
+            }
+            CalibrationState.READY -> {
+                ReadyCalibrationScreen()
+            }
+            CalibrationState.MEASURING -> {
+                MeasuringCalibrationScreen(
+                    uiState = uiState,
+                    onCancel = { viewModel.cancelMeasurement() }
+                )
+            }
+            CalibrationState.INPUT_DISTANCE -> {
+                DistanceInputScreen(
+                    measuredSpeed = uiState.lastMeasuredSpeed,
+                    onDistanceInput = { distance ->
+                        viewModel.inputActualDistance(distance)
+                    },
+                    onCancel = {
+                        viewModel.cancelDistanceInput()
+                    }
                 )
             }
         }
@@ -115,8 +110,8 @@ fun IdleCalibrationScreen(
             )
         }
         
-        // 현재 보정 계수
-        if (uiState.calibrationData.averageFactor > 0f) {
+        // 현재 보정 파라미터 (회귀분석 결과)
+        if (uiState.measurementCount > 0) {
             item {
                 Card(
                     onClick = {},
@@ -129,13 +124,16 @@ fun IdleCalibrationScreen(
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Text(
-                            text = "현재 보정 계수",
+                            text = "보정 함수",
                             style = MaterialTheme.typography.caption1,
                             color = MaterialTheme.colors.onSurfaceVariant
                         )
                         Text(
-                            text = "%.2f".format(uiState.calibrationData.averageFactor),
-                            fontSize = 24.sp,
+                            text = "거리 = %.1f × 속도 %+.1f".format(
+                                uiState.calibrationData.slope,
+                                uiState.calibrationData.intercept
+                            ),
+                            fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.Green
                         )
@@ -189,106 +187,193 @@ fun IdleCalibrationScreen(
 }
 
 @Composable
-fun ActiveCalibrationScreen(
-    currentSpeed: Float,
-    onStop: () -> Unit,
-    onComplete: () -> Unit,
-    onRestart: () -> Unit
+fun PracticeCalibrationScreen(
+    uiState: CalibrationUiState,
+    onCancel: () -> Unit
 ) {
-    // 화면이 꺼지지 않도록 유지
     KeepScreenOn()
     
-    // 스크롤 상태 - 초기에 첫 번째 아이템을 중앙에 배치
-    val listState = rememberScalingLazyListState(
-        initialCenterItemIndex = 0
-    )
-    
-    ScalingLazyColumn(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colors.background),
-        state = listState,
-        contentPadding = PaddingValues(
-            top = 40.dp,
-            bottom = 24.dp,
-            start = 12.dp,
-            end = 12.dp
-        ),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        contentAlignment = Alignment.Center
     ) {
-        // 현재 최대 속도 카드 (가장 먼저)
-        item {
-            Card(
-                onClick = {},
-                enabled = false,
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(24.dp),
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Text(
+                text = "보정 준비",
+                style = MaterialTheme.typography.title2,
+                color = MaterialTheme.colors.primary
+            )
+            
+            Text(
+                text = "2~3회 연습 스윙 후\n2초간 정지하세요",
+                style = MaterialTheme.typography.body1,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colors.onSurface
+            )
+            
+            // 정지 진행률 표시
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
+                if (uiState.isWristUp) {
                     Text(
-                        text = "측정된 최대 속도",
-                        style = MaterialTheme.typography.caption2,
-                        color = MaterialTheme.colors.onSurfaceVariant
+                        text = "⚠ 화면 확인 중",
+                        style = MaterialTheme.typography.caption1,
+                        color = Color.Yellow,
+                        fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "%.2f m/s".format(currentSpeed),
-                        fontSize = 40.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = when {
-                            currentSpeed > 0.3f -> Color.Green
-                            currentSpeed > 0f -> Color.Yellow
-                            else -> Color.Gray
-                        }
+                        text = "손목을 내려 퍼팅 자세를 취하세요",
+                        style = MaterialTheme.typography.caption3,
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colors.onSurfaceVariant
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        progress = { uiState.idleProgress },
+                        modifier = Modifier
+                            .fillMaxWidth(0.8f)
+                            .height(8.dp),
+                        color = if (uiState.idleProgress >= 1f) Color.Green else MaterialTheme.colors.primary,
+                    )
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Text(
+                        text = if (uiState.idleProgress >= 1f) "준비 완료!" else "%.1f초 / 2.0초".format(uiState.idleProgress * 2f),
+                        style = MaterialTheme.typography.caption1,
+                        color = if (uiState.idleProgress >= 1f) Color.Green else MaterialTheme.colors.onSurfaceVariant
                     )
                 }
             }
-        }
-        
-        // 거리 입력 버튼 (큰 버튼)
-        item {
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
             Button(
-                onClick = onComplete,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = currentSpeed > 0.3f,
-                colors = ButtonDefaults.buttonColors(
-                    backgroundColor = if (currentSpeed > 0.3f) 
-                        MaterialTheme.colors.primary 
-                    else 
-                        MaterialTheme.colors.surface
-                )
-            ) {
-                Text(
-                    text = if (currentSpeed > 0.3f) "거리 입력하기" else "스윙 후 클릭",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-        
-        // 측정 취소 버튼
-        item {
-            Button(
-                onClick = onStop,
-                modifier = Modifier.fillMaxWidth(),
+                onClick = onCancel,
+                modifier = Modifier.fillMaxWidth(0.8f),
                 colors = ButtonDefaults.secondaryButtonColors()
             ) {
                 Text("취소")
             }
         }
-        
-        // 다시 측정 버튼
-        item {
-            Button(
-                onClick = onRestart,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(
-                    backgroundColor = MaterialTheme.colors.surface
+    }
+}
+
+@Composable
+fun ReadyCalibrationScreen() {
+    KeepScreenOn()
+    
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colors.background),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text(
+                text = "✓",
+                fontSize = 72.sp,
+                color = Color.Green
+            )
+            
+            Text(
+                text = "준비 완료!",
+                style = MaterialTheme.typography.title1,
+                color = Color.Green,
+                fontWeight = FontWeight.Bold
+            )
+            
+            Text(
+                text = "퍼팅하세요",
+                style = MaterialTheme.typography.body1,
+                color = MaterialTheme.colors.onSurface
+            )
+        }
+    }
+}
+
+@Composable
+fun MeasuringCalibrationScreen(
+    uiState: CalibrationUiState,
+    onCancel: () -> Unit
+) {
+    KeepScreenOn()
+    
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colors.background),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Text(
+                text = "보정 측정 중",
+                style = MaterialTheme.typography.title2,
+                color = Color.Green
+            )
+            
+            Text(
+                text = "퍼팅하세요",
+                style = MaterialTheme.typography.body1,
+                color = MaterialTheme.colors.onSurface
+            )
+            
+            // 현재 최대 속도 표시
+            if (uiState.currentMaxSpeed > 0f) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            color = MaterialTheme.colors.surface,
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                        )
+                        .padding(vertical = 8.dp, horizontal = 12.dp)
+                ) {
+                    Text(
+                        text = "최대 속도",
+                        style = MaterialTheme.typography.caption3,
+                        color = MaterialTheme.colors.onSurfaceVariant
+                    )
+                    Text(
+                        text = "%.2f m/s".format(uiState.currentMaxSpeed),
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Yellow
+                    )
+                }
+            } else {
+                Text(
+                    text = "●",
+                    fontSize = 32.sp,
+                    color = Color.Green
                 )
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Button(
+                onClick = onCancel,
+                modifier = Modifier.fillMaxWidth(0.7f),
+                colors = ButtonDefaults.secondaryButtonColors()
             ) {
-                Text("다시 측정")
+                Text("취소", style = MaterialTheme.typography.caption1)
             }
         }
     }
@@ -419,14 +504,12 @@ fun DistanceInputScreen(
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 NumberButton(".", Modifier.weight(1f)) {
-                    // 소수점이 없을 때만 추가
                     if (!distanceText.contains(".")) {
                         distanceText += "."
                     }
                 }
                 NumberButton("0", Modifier.weight(1f)) { distanceText += "0" }
                 NumberButton("←", Modifier.weight(1f)) {
-                    // 백스페이스
                     if (distanceText.isNotEmpty()) {
                         distanceText = distanceText.dropLast(1)
                     }
@@ -439,13 +522,13 @@ fun DistanceInputScreen(
             Button(
                 onClick = {
                     val distance = distanceText.toFloatOrNull()
-                    if (distance != null && distance > 0f && distance <= 20f) {
+                    if (distance != null && distance > 0f) {
                         onDistanceInput(distance)
                     }
                 },
                 modifier = Modifier.fillMaxWidth(0.95f),
                 enabled = distanceText.isNotEmpty() && 
-                          distanceText.toFloatOrNull()?.let { it > 0f && it <= 20f } == true
+                          distanceText.toFloatOrNull()?.let { it > 0f } == true
             ) {
                 Text("확인")
             }
@@ -484,4 +567,3 @@ fun NumberButton(
         )
     }
 }
-

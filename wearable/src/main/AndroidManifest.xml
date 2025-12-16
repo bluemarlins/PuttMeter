@@ -27,11 +27,6 @@
         <meta-data
             android:name="com.google.android.wearable.standalone"
             android:value="true" />
-            
-        <!-- Wearable capabilities -->
-        <meta-data
-            android:name="com.google.android.wearable.beta.app"
-            android:resource="@array/android_wear_capabilities" />
 
         <activity
             android:name=".presentation.MainActivity"

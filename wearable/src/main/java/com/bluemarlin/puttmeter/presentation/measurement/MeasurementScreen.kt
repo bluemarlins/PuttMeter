@@ -448,6 +448,47 @@ fun MeasuringScreen(
                         )
                     }
                 }
+                
+                // 가속도 방향 정보
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "방향 내적: ",
+                        style = MaterialTheme.typography.caption3,
+                        color = MaterialTheme.colors.onSurfaceVariant
+                    )
+                    Text(
+                        text = "%.2f".format(uiState.debugAccelDirectionDotProduct),
+                        style = MaterialTheme.typography.caption2,
+                        fontWeight = FontWeight.Medium,
+                        color = when {
+                            uiState.debugAccelDirectionDotProduct > 0.7f -> Color.Green  // 안정적
+                            uiState.debugAccelDirectionDotProduct > 0.0f -> Color.Yellow  // 변화 중
+                            else -> Color.Red  // 반대 방향
+                        }
+                    )
+                }
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "방향 안정: ",
+                        style = MaterialTheme.typography.caption3,
+                        color = MaterialTheme.colors.onSurfaceVariant
+                    )
+                    Text(
+                        text = if (uiState.debugIsAccelDirectionStable) "안정 ●" else "변화 중",
+                        style = MaterialTheme.typography.caption2,
+                        fontWeight = FontWeight.Medium,
+                        color = if (uiState.debugIsAccelDirectionStable) Color.Green else Color.Yellow
+                    )
+                }
             }
             
             Spacer(modifier = Modifier.height(4.dp))

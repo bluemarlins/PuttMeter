@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- Enhanced theme for API 23+ -->
-    <style name="Theme.PuttMeter" parent="Theme.AppCompat.DayNight.NoActionBar">
-        <item name="colorPrimary">@color/purple_500</item>
-        <item name="android:statusBarColor">@android:color/transparent</item>
-        <item name="android:windowLightStatusBar">true</item>
-    </style>
-</resources>
